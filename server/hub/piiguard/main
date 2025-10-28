@@ -1,0 +1,197 @@
+from guardrails.validator_base import (
+    FailResult,
+    PassResult,
+    ValidationResult,
+    Validator,
+    register_validator,
+)
+
+from typing import Callable, List, Optional, Union, Any
+from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
+from presidio_analyzer.nlp_engine import NlpEngineProvider
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
+from .recognizer import cn_phone_recognizer,cn_id_card_recognizer,cn_email_recognizer,cn_address_recognizer, LTPAddressRecognizer
+
+@register_validator(name="xd810/piiguard", data_type="string")
+class PIIGuard(Validator):
+    CONFIG={
+        "nlp_engine_name": "spacy",
+        "models": [
+            {"lang_code": "zh", "model_name": "zh_core_web_lg"},
+            {"lang_code": "en", "model_name": "en_core_web_sm"}
+        ]
+    }
+    ENTITIES=[
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "CREDIT_CARD",
+        "LOCATION",
+        # "PERSON",
+        
+        "CN_PHONE_NUMBER",
+        "CN_EMAIL_ADDRESS",
+        "CN_ADDRESS",
+        "CN_ID_CARD",
+    ]
+    def __init__(
+        self,
+        device: str = "cuda",
+        on_fail: Optional[Callable] = None,
+        entities: Optional[List[str]] = None,
+        **kwargs,
+    ):
+    
+        super().__init__(on_fail=on_fail, **kwargs)
+        self.device = device
+        self.entities = entities if entities is not None else PIIGuard.ENTITIES
+        provider = NlpEngineProvider(nlp_configuration=PIIGuard.CONFIG)
+        nlp_engine = provider.create_engine()
+        self.analyzer = AnalyzerEngine(
+            nlp_engine=nlp_engine, 
+            supported_languages=["zh", "en"]
+        )
+        
+        # 一次性注册所有中文识别器
+        self.analyzer.registry.add_recognizer(cn_phone_recognizer)
+        self.analyzer.registry.add_recognizer(cn_id_card_recognizer)
+        self.analyzer.registry.add_recognizer(cn_email_recognizer)
+        # self.analyzer.registry.add_recognizer(cn_address_recognizer)
+        self.analyzer.registry.add_recognizer(LTPAddressRecognizer(device=self.device))
+        
+        # 创建匿名化引擎
+        self.anonymizer = AnonymizerEngine()
+    
+    def validate(
+        self,
+        value: Union[str, List[str]],
+        metadata: Optional[dict] = None,
+    ) -> ValidationResult:
+        """
+        ENTITIES=[
+            "EMAIL_ADDRESS",
+            "PHONE_NUMBER",
+            "CREDIT_CARD",
+            "LOCATION",
+            # "PERSON",
+            # "DATE_TIME",
+            
+            "CN_PHONE_NUMBER",
+            "CN_EMAIL_ADDRESS",
+            "CN_ADDRESS",
+            "CN_ID_CARD",
+        ]
+        """
+        # 处理输入参数
+        if metadata is None:
+            metadata = {}
+        
+        entities = metadata.get("entities", self.entities)
+        
+        # 处理列表输入
+        if isinstance(value, list):
+            value = "\n".join(value)
+        
+        # 进行PII检测和匿名化
+        anonymized_text, error_spans, results = self.anonymize(text=value, entities=entities)
+
+        if len(error_spans) == 0:
+            return PassResult(value=value, metadata=metadata)
+        else:
+            # 构建详细的错误信息
+            pii_details = []
+            for result in results:
+                entity_text = value[result.start:result.end]
+                pii_details.append(f"{result.entity_type}: '{entity_text}' (confidence: {result.score:.2f})")
+            
+            error_message = f"PII detected in text. Found {len(error_spans)} sensitive entity(ies):\n" + "\n".join(pii_details)
+            
+            return FailResult(
+                error_message=error_message,
+                fix_value=anonymized_text,
+                error_spans=error_spans,
+            )
+    
+    def _analyze_text(self, text: str, entities: List[str]) -> List[Any]:
+        """分析文本，检测PII实体"""
+        
+        # 先分析中文
+        results_zh = self.analyzer.analyze(text=text, language="zh", entities=entities)
+        
+        unique_results=results_zh
+        # 再分析英文
+        # results_en = self.analyzer.analyze(text=text, language="en", entities=entities)
+        
+        # # 合并结果并去重
+        # all_results = results_zh + results_en
+        
+        # # 按位置去重，保留置信度更高的结果
+        # unique_results = []
+        # for result in all_results:
+        #     # 检查是否与现有结果重叠
+        #     is_duplicate = False
+        #     for existing in unique_results:
+        #         if (result.start >= existing.start and result.start < existing.end) or \
+        #            (result.end > existing.start and result.end <= existing.end) or \
+        #            (result.start <= existing.start and result.end >= existing.end):
+        #             # 有重叠，保留置信度更高的
+        #             if result.score > existing.score:
+        #                 unique_results.remove(existing)
+        #                 unique_results.append(result)
+        #             is_duplicate = True
+        #             break
+            
+        #     if not is_duplicate:
+        #         unique_results.append(result)
+        
+        
+        return unique_results
+    
+    def _create_anonymize_operators(self) -> dict:
+        """创建匿名化操作配置"""
+        return {
+            # 中文特定识别器
+            "CN_PHONE_NUMBER": OperatorConfig("replace", {"new_value": "[手机号]"}),
+            "CN_EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "[邮箱]"}),
+            "CN_ID_CARD": OperatorConfig("replace", {"new_value": "[身份证号]"}),
+            "CN_ADDRESS": OperatorConfig("replace", {"new_value": "[地址]"}),
+            # 内置识别器（主要针对英文）
+            "PHONE_NUMBER": OperatorConfig("replace", {"new_value": "[phone]"}),
+            "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "[email]"}),
+            "PERSON": OperatorConfig("replace", {"new_value": "[person]"}),
+            "LOCATION": OperatorConfig("replace", {"new_value": "[location]"}),
+            "ORGANIZATION": OperatorConfig("replace", {"new_value": "[organization]"}),
+            "DATE_TIME": OperatorConfig("replace", {"new_value": "[date]"}),
+            "CREDIT_CARD": OperatorConfig("replace", {"new_value": "[credit_card]"}),
+            "IBAN_CODE": OperatorConfig("replace", {"new_value": "[iban]"}),
+            "IP_ADDRESS": OperatorConfig("replace", {"new_value": "[ip_address]"}),
+            "URL": OperatorConfig("replace", {"new_value": "[url]"}),
+        }
+    
+    def anonymize(self, text: str, entities: List[str]) -> tuple:
+        """检测并匿名化PII信息，返回匿名化文本、错误范围和原始结果"""
+        # 分析文本
+        results = self._analyze_text(text, entities)
+        
+        # 创建错误范围列表
+        error_spans = []
+        for result in results:
+            error_spans.append({
+                "start": result.start,
+                "end": result.end,
+                "reason": f"Detected {result.entity_type} with confidence {result.score:.2f}"
+            })
+        
+        # 如果没有检测到PII，直接返回原文本
+        if not results:
+            return text, error_spans, results
+        
+        # 匿名化处理
+        operators = self._create_anonymize_operators()
+        anonymized_result = self.anonymizer.anonymize(
+            text=text,
+            analyzer_results=results,
+            operators=operators
+        )
+        
+        return anonymized_result.text, error_spans, results
