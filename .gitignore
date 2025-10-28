@@ -7,3 +7,6 @@ __pycache__/
 # 忽略操作系统文件
 .DS_Store
 Thumbs.db
+
+# 忽略大型模型文件，它们将被托管在 Hugging Face Hub 上
+model/
