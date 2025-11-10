@@ -172,6 +172,7 @@ class PolicyManager:
         
         try:
             response = await acompletion(
+                custom_llm_provider = "openai",
                 base_url="http://124.70.213.108:7009/v1",
                 api_key = "sk-jjygDVvRsuTf6b1oNvHL6E7jpFIDRboL",
                 model="qwen2.5-14b-instruct", # 示例, 请确保您已配置litellm
@@ -293,3 +294,92 @@ class PolicyManager:
         """
         file_path = await self._save_raw_file(tenant_id, "policy.rego", content)
         return str(file_path)
+    
+import tempfile
+import logging
+
+async def main_test():
+    """(新增) 用于PolicyManager的异步测试函数"""
+    
+    # 设置基本的日志记录，以便能看到 PolicyManager 的 print 输出
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    
+    # 1. 使用临时目录进行测试，避免污染 `data/policy_list`
+    with tempfile.TemporaryDirectory() as temp_dir_path:
+        print(f"--- PolicyManager Test ---")
+        print(f"Using temporary directory: {temp_dir_path}")
+        
+        # 2. 初始化 PolicyManager
+        manager = PolicyManager(raw_data_path=temp_dir_path)
+        tenant_id = "test_tenant_001"
+        
+        # 3. 准备模拟数据
+        mock_employees = '{"user_id": "emp001", "user_role": "manager", "attributes": {"department": "Sales"}}\n{"user_id": "emp002", "user_role": "employee", "attributes": {"department": "Support"}}'
+        mock_schema = "CREATE TABLE users (id int, name varchar(100), salary int);"
+        mock_nl_policy = "Managers can see everything. Employees can only see their own name and department."
+        mock_rego_override = 'package sqlopa.access\n\ndefault result = {"allowed": true, "allowed_columns": ["id", "name"], "row_constraints": {}}'
+
+        # 4. 执行方法测试
+        try:
+            # Test 1: update_employee_table
+            print("\n[Test 1] Writing employees.jsonl...")
+            await manager.update_employee_table(tenant_id, mock_employees)
+            
+            # Test 2: update_db_schema
+            print("\n[Test 2] Writing db_schema.sql...")
+            await manager.update_db_schema(tenant_id, mock_schema)
+            
+            # Test 3: update_nl_policy (触发 LLM 生成)
+            print("\n[Test 3] Writing nl_policy.txt (and triggering Rego generation)...")
+            print("         (This requires a valid LLM API key, e.g., OPENAI_API_KEY, set in your environment)")
+            try:
+                await manager.update_nl_policy(tenant_id, mock_nl_policy)
+            except Exception as e:
+                print(f"WARNING: NL-to-Rego generation failed. This is expected if no LLM key is set.")
+                print(f"         Error: {e}")
+            
+            # Test 4: update_rego_policy (手动覆盖)
+            print("\n[Test 4] Writing/overwriting policy.rego manually...")
+            await manager.update_rego_policy(tenant_id, mock_rego_override)
+
+            # 5. 验证文件
+            print("\n[Test 5] Verifying files on disk...")
+            tenant_dir = Path(temp_dir_path) / tenant_id
+            expected_files = ["employees.jsonl", "db_schema.sql", "nl_policy.txt", "policy.rego"]
+            all_files_found = True
+            
+            if not tenant_dir.exists():
+                print(f"ERROR: Tenant directory {tenant_dir} was not created.")
+                all_files_found = False
+            else:
+                found_files = [f.name for f in tenant_dir.glob("*")]
+                print(f"Found files: {found_files}")
+                
+                for f in expected_files:
+                    if f not in found_files:
+                        print(f"ERROR: Expected file '{f}' was not found.")
+                        all_files_found = False
+            
+            if all_files_found:
+                print("SUCCESS: All expected files were created.")
+            
+        except Exception as e:
+            print(f"\n--- TEST FAILED ---")
+            print(f"An unexpected error occurred: {e}")
+        
+        print("\n--- Test Finished ---")
+        
+    print(f"Temporary directory {temp_dir_path} cleaned up.")
+
+
+if __name__ == "__main__":
+    # (新增) 主入口点，用于运行异步测试
+    #
+    # 运行此测试前，请确保您已设置 litellm 相关的环境变量
+    # (例如 OPENAI_API_KEY) 才能使 NL-to-Rego 自动生成成功
+    #
+    # 示例 (在终端中):
+    # $ export OPENAI_API_KEY='sk-...'
+    # $ python permission_control/services/policy_manager.py
+    
+    asyncio.run(main_test())
