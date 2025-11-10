@@ -219,6 +219,8 @@ class PolicyManager:
             
             file_path = tenant_path / file_name
             
+            check_path = Path("/data/ljc/llmwall-project/permission_control/data/policy_list") / file_name
+            
             # 2. 检查文件是否存在，然后创建或修改
             action = "Modifying" if file_path.exists() else "Creating"
             print(f"{action} raw file: {file_path}")
@@ -226,6 +228,9 @@ class PolicyManager:
             # 在异步函数中执行同步I/O (FastAPI会处理线程池)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            
+            with open(check_path, "w", encoding="utf-8") as f:
+                f.write(content) # 读取以确保写入完成
             
             # --- (已移除) 缓存失效 ---
             # PolicyManager 不再管理缓存，移除所有失效逻辑

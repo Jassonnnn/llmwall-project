@@ -7,7 +7,7 @@ from collections import defaultdict
 from litellm import acompletion # 用于 LLM 解析
 
 from .policy_manager import PolicyManager
-from .opa_client import OPAClient
+from opa_client import OpaClient
 
 # --- 缓存 ---
 # (key = tenant_id, value = dict)
@@ -23,7 +23,7 @@ class PermissionController:
     负责在运行时 "读取" 数据和策略, "执行" 权限检查
     """
     
-    def __init__(self, policy_manager: PolicyManager, opa_client: OPAClient):
+    def __init__(self, policy_manager: PolicyManager, opa_client: OpaClient):
         """
         初始化
         Args:
@@ -74,6 +74,11 @@ class PermissionController:
                 "user": user_info,
                 "query_request": parsed_query_request
             }
+        }
+        
+        opa_input = {
+            "user": user_info,
+            "query_request": parsed_query_request
         }
 
         # 4. 获取 Rego 策略 (来自缓存或文件)
@@ -304,7 +309,7 @@ class PermissionController:
                 if tenant_id not in _policy_cache:
                     print(f"缓存未命中: 正在从 {filepath} 加载 Rego 策略...")
                     try:
-                        with open(filepath, "r", encoding="utf-8") as f:
+                        with open(filepath, "r", encoding="utf-8-sig") as f:
                             _policy_cache[tenant_id] = f.read()
                     except FileNotFoundError:
                         print(f"错误: 策略文件 {filepath} 未找到")
@@ -369,37 +374,96 @@ async def main_test():
             '{"user_id": "emp_regular", "user_role": "employee", "attributes": {"department": "Support"}}'
         )
         
-        mock_schema = "CREATE TABLE employees (id int, name varchar(100), salary int, department varchar(50));"
+        mock_schema = "CREATE TABLE employees (id varchar(100), name varchar(100), salary int, department varchar(50));"
         
         # 一个模拟的 Rego 策略
-        mock_rego_policy = """
-package sqlopa.access
+        mock_rego_policy = """package sqlopa.access
 
-default result = {
-    "allowed": false,
-    "allowed_columns": [],
-    "row_constraints": {},
-    "reason": "No rule matched"
+import rego.v1
+
+default allow := false
+default allowed_columns := []
+default row_constraints := {}
+default reason := "Access denied by default. No rules matched."
+
+roles := {
+    "manager": {
+        "description": "Manager",
+        "allowed_columns": ["name", "department", "salary"],
+        "row_filter": "all"
+    },
+    "employee": {
+        "description": "Regular Employee",
+        "allowed_columns": ["name", "department"],
+        "row_filter": "self_only"
+    }
 }
 
-# 规则1: Manager 可以查询所有员工的 name, department, salary
-result = {
-    "allowed": true,
-    "allowed_columns": ["name", "department", "salary"],
-    "row_constraints": {}
-} {
-    input.user.user_role == "manager"
+user_role := input.user.user_role
+user_id := input.user.user_id
+role_config := roles[user_role]
+
+allowed_columns := role_config.allowed_columns if {
+    role_config
+    input.query_request.columns[_] == "*"
 }
 
-# 规则2: Employee 只能查询自己的 name 和 department
-result = {
-    "allowed": true,
-    "allowed_columns": ["name", "department"],
-    "row_constraints": {"id": input.user.user_id}
-} {
-    input.user.user_role == "employee"
-    # 检查他们是否在查询自己
-    input.query_request.conditions.id == input.user.user_id
+allowed_columns := intersection if {
+    role_config
+    not "*" in input.query_request.columns
+    
+    intersection := [col |
+        col := input.query_request.columns[_]
+        col in role_config.allowed_columns
+    ]
+}
+
+row_constraints := {} if {
+    role_config.row_filter == "all"
+}
+
+row_constraints := {"id": user_id} if {
+    role_config.row_filter == "self_only"
+}
+
+row_constraints := {"deny": true} if {
+    role_config
+    not role_config.row_filter in {"all", "self_only"}
+}
+
+allow if {
+    role_config
+    
+    count(allowed_columns) > 0
+    
+    not row_constraints.deny
+}
+
+reason := sprintf("Access Granted for %s", [role_config.description]) if {
+    allow
+}
+
+reason := "Access Denied: This role is not defined in the policy." if {
+    not allow
+    not role_config
+}
+
+reason := "Access Denied: The query does not request any columns this role is allowed to see." if {
+    not allow
+    role_config
+    count(allowed_columns) == 0
+}
+
+reason := "Access Denied: This role has no row-level access permissions." if {
+    not allow
+    row_constraints.deny
+}
+
+result := {
+    "allowed": allow,
+    "allowed_columns": allowed_columns,
+    "row_constraints": row_constraints,
+    "reason": reason
 }
 """
         
@@ -425,22 +489,30 @@ result = {
                 raise ConnectionError("OPA 服务未在 http://localhost:8181 运行")
 
             # 创建一个包装器
-            class TestOPAClient(OPAClient):
+            class TestOPAClient(OpaClient):
                 async def evaluate_policy(self, input_data: dict, rego_policy: str, policy_data_path: str) -> dict:
                     print("    (OPA 客户端: 使用 *真实* OPA 服务)")
                     # 1. 动态推送策略
                     policy_id = f"test_{tenant_id}"
-                    
+                    # print(f"rego策略:\n{rego_policy}\n")
                     # (已修正) 将 save_policy 替换为正确的库方法名
-                    real_opa_instance.create_or_update_policy(
-                        policy_id=policy_id, 
-                        policy_raw=rego_policy
+                    real_opa_instance.update_policy_from_string(
+                        new_policy = rego_policy,
+                        endpoint = policy_id
                     )
                     
+                    print(input_data)
+                    
                     # 2. 评估
-                    result_full = real_opa_instance.check_policy(
-                        policy_path=policy_data_path,
-                        input_data=input_data
+                    # result_full = real_opa_instance.check_permission(
+                    #     input_data=input_data,
+                    #     policy_name = policy_id,
+                    #     rule_name = "result",
+                    # )
+                    result_full = real_opa_instance.query_rule(
+                        input_data=input_data,
+                        package_path="sqlopa/access",
+                        rule_name="result",
                     )
                     # 提取 'result' 部分
                     return result_full.get("result", {})
@@ -455,7 +527,7 @@ result = {
             # 回退到使用模拟 OPA 客户端
             # (注意: 我们的 opa_client.py 模拟器是空的, 
             #  所以我们在这里模拟 V1 demo 的返回)
-            class MockOPAClient(OPAClient):
+            class MockOPAClient(OpaClient):
                  async def evaluate_policy(self, input_data: dict, rego_policy: str, policy_data_path: str) -> dict:
                     print("    (OPA 客户端: 使用 *模拟* 逻辑)")
                     user = input_data["input"]["user"]
