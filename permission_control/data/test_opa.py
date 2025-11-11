@@ -1,5 +1,6 @@
 from opa_client import OpaClient
-
+from litellm import acompletion
+import asyncio
 # policy_string = """
 # package sqlopa.access
 
@@ -139,6 +140,30 @@ from opa_client import OpaClient
 #     "reason": reason
 # }
 # """
+
+# import litellm
+
+# litellm.set_verbose=True
+
+# async def test_llm():
+
+#     response = await acompletion(
+#         custom_llm_provider="openai",
+#         base_url="http://124.70.213.108:7009/v1",
+#         api_key="sk-jjygDVvRsuTf6b1oNvHL6E7jpFIDRboL",
+#         model="qwen2.5-14b-instruct",
+#         messages=[
+#             {"role": "system", "content": "你是一个专家。"},
+#             {"role": "user", "content": "你好"}
+#         ],
+#         temperature=0.0,
+#         drop_params=True
+#     )
+
+#     content = response.choices[0].message.content
+#     return content
+
+# asyncio.run(test_llm())
 
 client = OpaClient(host="localhost", port=8181)
 
