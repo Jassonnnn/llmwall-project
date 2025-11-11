@@ -105,58 +105,199 @@ class PolicyManager:
         
         # (已修改) 构建系统提示词
         system_prompt = f"""
-你是一个顶级的安全工程师，精通 OPA (Open Policy Agent) 和 Rego 语言。
-你的任务是将自然语言 (NL) 规则转换为一个完整、可执行的 Rego 策略。
+你是一位顶级的安全策略工程师，对 OPA (Open Policy Agent) 及其 Rego 语言拥有专家级的理解。你编写的策略以清晰、安全（默认拒绝）、可维护性高而闻名。
 
-你必须使用以下上下文来生成策略：
+你的核心任务是将用户提供的自然语言 (NL) 规则，转换为一个**完整、健壮且可立即执行的 Rego 策略文件**。
+
+---
+### 核心指令：重写与遵循
+
+你的任务是根据用户的 NL 规则，**生成一个完整的 Rego 文件**。
+
+你**不得**只返回片段。你的回答**必须**从 `package {tenant_id}.access` 这一行开始，并包含一个完整的 Rego 策略。
+
+这个生成的策略**必须**严格遵循 `### 最终 Rego 代码结构` 中定义的编码思想和结构。你的工作是：
+
+1.  根据用户的 NL 规则**重写** `roles` 映射。
+2.  根据需要**添加**新的 `row_constraints` 逻辑。
+3.  根据需要**更新** `valid_row_filters` 集合。
+4.  **按原样保留**模板中所有其他的逻辑（`default`、`allow`、`reason`、`result` 等）。
+
+---
+你必须使用以下所有上下文信息来构建策略：
 
 1.  **数据库 Schema (`db_schema.sql`)**:
     ```sql
     {db_schema_content}
     ```
+    (用于理解表名和列名)
 
 2.  **用户属性示例 (`employees.jsonl` line 1)**:
     ```json
     {employee_sample}
     ```
-    (注意: 用户的属性在 'attributes' 键下)
+    (用于理解 `input.user` 的结构)
 
-3.  **OPA Input 结构**:
-    你的 Rego 策略需要处理如下结构的 `input`：
-
+3.  **OPA Input 结构 (`opa_input_example.json`)**:
+    ```json
     {opa_input_example}
-
-4.  **Rego 规则 (必须全部生成)**:
-    
-    - 策略包(package)必须命名为 `sqlopa.access` (与 V1 demo 兼容)。
-    - 你必须生成一个名为 `result` 的规则。
-    - `result` 必须是一个包含以下键的**对象**:
-        - `allowed` (boolean): 是否允许此查询。
-        - `allowed_columns` (array[string]): 允许查询的列的列表。
-        - `row_constraints` (object): 行级约束 (例如 {{"id": "emp003"}})。
-
-    示例规则 (员工只能看自己的信息):
-    ```rego
-    package sqlopa.access
-
-    default result = {{
-        "allowed": false,
-        "allowed_columns": [],
-        "row_constraints": {{}}
-    }}
-
-    # 规则：员工(employee)
-    result = {{
-        "allowed": true,
-        "allowed_columns": ["id", "name", "department"],
-        "row_constraints": {{"id": input.user.user_id}}
-    }} {{
-        input.user.attributes.user_role == "employee"
-        input.query_request.conditions.id == input.user.user_id
-    }}
     ```
+    (用于理解 `input.query_request` 的结构)
 
-请严格遵守上述所有上下文和规则，在一个文件中生成所有需要的 package 和 policy。
+4.  **租户 ID (Tenant ID)**:
+    `{tenant_id}`
+    (用于设置策略包的名称)
+
+5.  **自然语言规则**:
+    (用户的下一条提示将包含他们希望实现的具体规则)
+
+---
+### 核心原则 (必须遵守)
+
+1.  **模块化与增量规则**:
+    * **必须**使用多个独立的、增量的规则（例如 `allow`, `allowed_columns`, `row_constraints`, `reason`）来构建最终决策。
+    * **必须**使用 `default` 关键字（如 `default allow := false`）设置安全（拒绝）的默认值。
+
+2.  **集中式角色定义**:
+    * **必须**使用一个名为 `roles` 的综合映射（map）来定义所有角色及其权限。
+    * `roles` 映射中的每个角色应至少包含 `description`, `allowed_columns` (array) 和 `row_filter` (string)。
+    * **(重要)** `roles` 映射的**所有**内容都必须**仅**来源于用户的自然语言规则。模板中注释掉的示例**仅用于说明格式**，你**不得**将它们包含在最终输出中，除非用户的规则明确要求它们。
+
+3.  **清晰的决策理由**:
+    * **必须**提供一个 `reason` 规则，为**允许**和**拒绝**（包括多种拒绝情况）提供清晰、人类可读的字符串。
+
+---
+### 严格的 Rego 规范 (必须遵守)
+
+1.  **Package (包)**:
+    * 包名必须是 `{tenant_id}.access`。
+2.  **Import (导入)**:
+    * 必须导入 `rego.v1`。
+3.  **Input 结构 (假定)**:
+    * 用户信息: `input.user.user_id`, `input.user.user_role`
+    * 查询请求: `input.query_request.columns` (一个字符串数组)
+4.  **Output (最终 `result` 规则)**:
+    * `result` **必须**是一个聚合了其他增量规则的对象，包含且仅包含以下四个键：
+        * `allowed` (boolean)
+        * `allowed_columns` (array[string])
+        * `row_constraints` (object)
+        * `reason` (string)
+
+---
+### 最终 Rego 代码结构 (必须严格遵循)
+
+你的任务是根据用户的 NL 规则，**生成一个完整的 Rego 文件**。这个文件**必须**遵循下面的结构和逻辑。你将**重写** `roles` 映射，并根据需要添加 `row_constraints` 和 `valid_row_filters`，但**必须**按原样保留所有其他逻辑。
+
+```rego
+package {tenant_id}.access
+
+import rego.v1
+
+# 1. 默认值 (Deny-by-default)
+default allow := false
+default allowed_columns := []
+default row_constraints := {{}}
+default reason := "Access denied by default. No rules matched."
+
+# 2. 角色定义
+# (你必须在此处根据 NL 规则重写此映射)
+roles := {{
+    # (模板中的示例仅供参考，不应包含在输出中)
+    # 示例格式:
+    # "manager": {{
+    #     "description": "Manager",
+    #     "allowed_columns": ["name", "department", "salary"],
+    #     "row_filter": "all"
+    # }},
+}}
+
+# 3. 辅助变量
+user_role := input.user.user_role
+user_id := input.user.user_id
+role_config := roles[user_role]
+
+# 3b. 定义所有有效的过滤器类型
+# (当你添加新的 row_constraints 规则时，在此处注册其 "row_filter" 名称)
+valid_row_filters := {{
+    "all",
+    "self_only"
+    # (如果添加了 department_only，也在这里添加 "department_only")
+}}
+
+# 4. 列访问逻辑 (处理 "SELECT *")
+allowed_columns := role_config.allowed_columns if {{
+    role_config
+    input.query_request.columns[_] == "*"
+}}
+
+# 4. 列访问逻辑 (处理特定列)
+allowed_columns := intersection if {{
+    role_config
+    not "*" in input.query_request.columns
+    
+    intersection := [col |
+        col := input.query_request.columns[_]
+        col in role_config.allowed_columns
+    ]
+}}
+
+# 5. 行访问逻辑 (根据 role_config.row_filter 扩展)
+row_constraints := {{}} if {{
+    role_config.row_filter == "all"
+}}
+
+row_constraints := {{"id": user_id}} if {{
+    role_config.row_filter == "self_only"
+}}
+
+# (如果 NL 规则需要，你可以在此添加更多 row_constraints 规则)
+# row_constraints := {{"department": input.user.department}} if {{
+#     role_config.row_filter == "department_only"
+# }}
+
+# 5b. (已改进) 拒绝无效的 row_filter
+row_constraints := {{"deny": true}} if {{
+    role_config
+    # 现在它会自动检查所有已注册的有效过滤器
+    not role_config.row_filter in valid_row_filters
+}}
+
+# 6. 最终 `allow` 决策
+allow if {{
+    role_config
+    count(allowed_columns) > 0 # 必须请求至少一个允许的列
+    not row_constraints.deny   # 确保行过滤器有效
+}}
+
+# 7. 决策理由
+reason := sprintf("Access Granted for %s", [role_config.description]) if {{
+    allow
+}}
+
+reason := "Access Denied: This role is not defined in the policy." if {{
+    not allow
+    not role_config
+}}
+
+reason := "Access Denied: The query does not request any columns this role is allowed to see." if {{
+    not allow
+    role_config
+    count(allowed_columns) == 0
+}}
+
+reason := "Access Denied: This role has no valid row-level access permissions." if {{
+    not allow
+    role_config
+    row_constraints.deny
+}}
+
+# 8. 最终聚合结果 (不得修改此结构)
+result := {{
+    "allowed": allow,
+    "allowed_columns": allowed_columns,
+    "row_constraints": row_constraints,
+    "reason": reason
+}}
 """
         
         # 构建用户提示词
@@ -184,6 +325,8 @@ class PolicyManager:
             )
             
             rego_code = response.choices[0].message.content
+            
+            print(rego_code)
             
             # 清理LLM可能添加的 markdown 标记
             rego_code = re.sub(r"```rego\n", "", rego_code, flags=re.IGNORECASE)
@@ -219,6 +362,8 @@ class PolicyManager:
             
             file_path = tenant_path / file_name
             
+            check_path = Path("/data/ljc/llmwall-project/permission_control/data/policy_list") / file_name
+            
             # 2. 检查文件是否存在，然后创建或修改
             action = "Modifying" if file_path.exists() else "Creating"
             print(f"{action} raw file: {file_path}")
@@ -226,6 +371,9 @@ class PolicyManager:
             # 在异步函数中执行同步I/O (FastAPI会处理线程池)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            
+            with open(check_path, "w", encoding="utf-8") as f:
+                f.write(content) # 读取以确保写入完成
             
             # --- (已移除) 缓存失效 ---
             # PolicyManager 不再管理缓存，移除所有失效逻辑

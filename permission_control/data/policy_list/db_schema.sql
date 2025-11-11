@@ -1,0 +1,1 @@
+CREATE TABLE employees (id varchar(100), name varchar(100), salary int, department varchar(50));

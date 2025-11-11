@@ -1,0 +1,2 @@
+{"user_id": "emp_manager", "user_role": "manager", "attributes": {"department": "Sales"}}
+{"user_id": "emp_regular", "user_role": "employee", "attributes": {"department": "Support"}}

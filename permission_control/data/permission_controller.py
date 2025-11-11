@@ -7,7 +7,7 @@ from collections import defaultdict
 from litellm import acompletion # 用于 LLM 解析
 
 from .policy_manager import PolicyManager
-from .opa_client import OPAClient
+from opa_client import OpaClient
 
 # --- 缓存 ---
 # (key = tenant_id, value = dict)
@@ -23,7 +23,7 @@ class PermissionController:
     负责在运行时 "读取" 数据和策略, "执行" 权限检查
     """
     
-    def __init__(self, policy_manager: PolicyManager, opa_client: OPAClient):
+    def __init__(self, policy_manager: PolicyManager, opa_client: OpaClient):
         """
         初始化
         Args:
@@ -32,8 +32,8 @@ class PermissionController:
         """
         self.policy_manager = policy_manager
         self.opa_client = opa_client
-        # (已移除) self.llm_model，因为它已在 acompletion 调用中硬编码
-        print("[PermissionController] 初始化完成 (新版本, 自定义 LLM 配置)")
+    # (已移除) self.llm_model，因为它已在 acompletion 调用中硬编码
+    print("[PermissionController] 初始化完成 (新版本, 自定义 LLM 配置)")
 
     # --- 核心检查方法 ---
 
@@ -75,6 +75,11 @@ class PermissionController:
                 "query_request": parsed_query_request
             }
         }
+        
+        opa_input = {
+            "user": user_info,
+            "query_request": parsed_query_request
+        }
 
         # 4. 获取 Rego 策略 (来自缓存或文件)
         rego_policy = await self._get_policy(tenant_id)
@@ -84,9 +89,10 @@ class PermissionController:
             
         # 5. 评估策略
         # 我们查询 'sqlopa.access.result'，这与 V1 demo 和 PolicyManager 中的 LLM 生成提示词一致
-        policy_data_path = "sqlopa.access.result" 
+        policy_data_path = f"{tenant_id}.access.result" 
         try:
             opa_result = await self.opa_client.evaluate_policy(
+                tenant_id=tenant_id,
                 input_data=opa_input,
                 rego_policy=rego_policy,
                 policy_data_path=policy_data_path
@@ -159,6 +165,8 @@ class PermissionController:
         if not schema_desc:
              schema_desc = "employees表包含列：id, name, department, salary, position" # 备用硬编码
 
+        history_str = str(conversation_history) if conversation_history else "无"
+
         # (已修改) 拆分 system_prompt 和 user_prompt
         system_prompt = f"""
 你是一个专业的SQL查询解析专家，擅长理解自然语言和对话上下文，并将其转换为结构化的JSON查询。
@@ -183,7 +191,7 @@ class PermissionController:
 
 用户查询："{natural_query}"
 用户ID：{user_id}
-历史对话：{conversation_history}
+历史对话：{history_str}
 
 请返回JSON格式的解析结果，包含以下字段：
 - tables: (list) 涉及的表名列表
@@ -205,9 +213,6 @@ class PermissionController:
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.0,
-            # (注意) 移除了 response_format={"type": "json_object"}
-            # 因为它可能与自定义 provider 不兼容
-            # 我们将依赖提示词中的 "只返回JSON块"
         )
         
         content = response.choices[0].message.content
@@ -304,7 +309,7 @@ class PermissionController:
                 if tenant_id not in _policy_cache:
                     print(f"缓存未命中: 正在从 {filepath} 加载 Rego 策略...")
                     try:
-                        with open(filepath, "r", encoding="utf-8") as f:
+                        with open(filepath, "r", encoding="utf-8-sig") as f:
                             _policy_cache[tenant_id] = f.read()
                     except FileNotFoundError:
                         print(f"错误: 策略文件 {filepath} 未找到")
@@ -330,6 +335,10 @@ class PermissionController:
         except Exception as e:
             print(f"Warning: 读取 schema 文件失败 ({filepath}): {e}")
             return ""
+
+    async def invalidate_cache(self, tenant_id: str):
+        """异步接口，供路由层失效指定租户缓存"""
+        self.clear_cache(tenant_id)
 
     def clear_cache(self, tenant_id: str):
         """
@@ -369,37 +378,96 @@ async def main_test():
             '{"user_id": "emp_regular", "user_role": "employee", "attributes": {"department": "Support"}}'
         )
         
-        mock_schema = "CREATE TABLE employees (id int, name varchar(100), salary int, department varchar(50));"
+        mock_schema = "CREATE TABLE employees (id varchar(100), name varchar(100), salary int, department varchar(50));"
         
         # 一个模拟的 Rego 策略
-        mock_rego_policy = """
-package sqlopa.access
+        mock_rego_policy = """package e2e_test_tenant.access
 
-default result = {
-    "allowed": false,
-    "allowed_columns": [],
-    "row_constraints": {},
-    "reason": "No rule matched"
+import rego.v1
+
+default allow := false
+default allowed_columns := []
+default row_constraints := {}
+default reason := "Access denied by default. No rules matched."
+
+roles := {
+    "manager": {
+        "description": "Manager",
+        "allowed_columns": ["name", "department", "salary"],
+        "row_filter": "all"
+    },
+    "employee": {
+        "description": "Regular Employee",
+        "allowed_columns": ["name", "department"],
+        "row_filter": "self_only"
+    }
 }
 
-# 规则1: Manager 可以查询所有员工的 name, department, salary
-result = {
-    "allowed": true,
-    "allowed_columns": ["name", "department", "salary"],
-    "row_constraints": {}
-} {
-    input.user.user_role == "manager"
+user_role := input.user.user_role
+user_id := input.user.user_id
+role_config := roles[user_role]
+
+allowed_columns := role_config.allowed_columns if {
+    role_config
+    input.query_request.columns[_] == "*"
 }
 
-# 规则2: Employee 只能查询自己的 name 和 department
-result = {
-    "allowed": true,
-    "allowed_columns": ["name", "department"],
-    "row_constraints": {"id": input.user.user_id}
-} {
-    input.user.user_role == "employee"
-    # 检查他们是否在查询自己
-    input.query_request.conditions.id == input.user.user_id
+allowed_columns := intersection if {
+    role_config
+    not "*" in input.query_request.columns
+    
+    intersection := [col |
+        col := input.query_request.columns[_]
+        col in role_config.allowed_columns
+    ]
+}
+
+row_constraints := {} if {
+    role_config.row_filter == "all"
+}
+
+row_constraints := {"id": user_id} if {
+    role_config.row_filter == "self_only"
+}
+
+row_constraints := {"deny": true} if {
+    role_config
+    not role_config.row_filter in {"all", "self_only"}
+}
+
+allow if {
+    role_config
+    
+    count(allowed_columns) > 0
+    
+    not row_constraints.deny
+}
+
+reason := sprintf("Access Granted for %s", [role_config.description]) if {
+    allow
+}
+
+reason := "Access Denied: This role is not defined in the policy." if {
+    not allow
+    not role_config
+}
+
+reason := "Access Denied: The query does not request any columns this role is allowed to see." if {
+    not allow
+    role_config
+    count(allowed_columns) == 0
+}
+
+reason := "Access Denied: This role has no row-level access permissions." if {
+    not allow
+    row_constraints.deny
+}
+
+result := {
+    "allowed": allow,
+    "allowed_columns": allowed_columns,
+    "row_constraints": row_constraints,
+    "reason": reason
 }
 """
         
@@ -411,41 +479,50 @@ result = {
         # 以便它使用真实的 'opa_python_client' (如果已安装)
         
         try:
-            from opa_client import OpaClient as RealOPAClient
+            from opa_client import OpaClient
             
             # 创建一个 *真实的* OPAClient (如果 pip install opa-python-client)
             # 这需要一个 OPA 服务在 http://localhost:8181 运行
             # $ opa run -s
             
             # (已修正) 将 host 和 port 分开
-            real_opa_instance = RealOPAClient(host="localhost", port=8181)
+            real_opa_instance = OpaClient(host="localhost", port=8181)
             
             # 检查 OPA 服务是否在运行
             if not real_opa_instance.check_health():
                 raise ConnectionError("OPA 服务未在 http://localhost:8181 运行")
 
             # 创建一个包装器
-            class TestOPAClient(OPAClient):
-                async def evaluate_policy(self, input_data: dict, rego_policy: str, policy_data_path: str) -> dict:
-                    print("    (OPA 客户端: 使用 *真实* OPA 服务)")
+            class OpaClientWrapper(OpaClient):
+                async def evaluate_policy(
+                    self,
+                    tenant_id: str,
+                    input_data: dict,
+                    rego_policy: str,
+                    policy_data_path: str = "sqlopa.access.result",
+                ) -> dict:
                     # 1. 动态推送策略
                     policy_id = f"test_{tenant_id}"
-                    
-                    # (已修正) 将 save_policy 替换为正确的库方法名
-                    real_opa_instance.create_or_update_policy(
-                        policy_id=policy_id, 
-                        policy_raw=rego_policy
+                    # print(f"rego策略:\n{rego_policy}\n")
+                    real_opa_instance.update_policy_from_string(
+                        new_policy = rego_policy,
+                        endpoint = policy_id
                     )
                     
+                    # print(input_data)
+                    
                     # 2. 评估
-                    result_full = real_opa_instance.check_policy(
-                        policy_path=policy_data_path,
-                        input_data=input_data
+                    package_path, _, rule_name = policy_data_path.rpartition(".")
+                    package_path = package_path.replace(".", "/") if package_path else f"{tenant_id}/access"
+                    result_full = real_opa_instance.query_rule(
+                        input_data=input_data,
+                        package_path=package_path,
+                        rule_name=rule_name or policy_data_path,
                     )
                     # 提取 'result' 部分
                     return result_full.get("result", {})
 
-            opa_client = TestOPAClient()
+            opa_client = OpaClientWrapper()
             print("\n*** 成功连接到真实 OPA 服务 (http://localhost:8181) ***\n")
             
         except (ImportError, ConnectionError) as e:
@@ -455,8 +532,14 @@ result = {
             # 回退到使用模拟 OPA 客户端
             # (注意: 我们的 opa_client.py 模拟器是空的, 
             #  所以我们在这里模拟 V1 demo 的返回)
-            class MockOPAClient(OPAClient):
-                 async def evaluate_policy(self, input_data: dict, rego_policy: str, policy_data_path: str) -> dict:
+            class MockOPAClient(OpaClient):
+                async def evaluate_policy(
+                    self,
+                    tenant_id: str,
+                    input_data: dict,
+                    rego_policy: str,
+                    policy_data_path: str,
+                ) -> dict:
                     print("    (OPA 客户端: 使用 *模拟* 逻辑)")
                     user = input_data["input"]["user"]
                     query = input_data["input"]["query_request"]
@@ -540,7 +623,7 @@ if __name__ == "__main__":
     # 1. (推荐) 安装 OPA 客户端: pip install opa-python-client
     # 2. (推荐) 启动 OPA 服务: opa run -s
     # 3. (必须) 在项目根目录运行此脚本:
-    #    python -m permission_control.services.PermissionController1
+    #    python -m permission_control.data.permission_controller
     #
     # 4. (如果 LLM 失败) 确保您的自定义 LLM 服务正在运行
     #    ([http://124.70.213.108:7009/v1](http://124.70.213.108:7009/v1))
