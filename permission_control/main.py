@@ -104,4 +104,4 @@ async def read_root():
     return {"status": "ok", "message": "Permission Control Service is running."}
 
 
-# uvicorn permission_control.main:app --port 11514 --reload
+# uvicorn permission_control.main:app --port 8888 --reload
