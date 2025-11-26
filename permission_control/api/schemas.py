@@ -9,7 +9,7 @@ from enum import Enum # (新增) 导入 Enum
 # (这些保持不变, 但我将使用 PermissionController1.py 中的新模型)
 
 class ChatQueryRequest(BaseModel):
-    tenant_id: str
+    policy_id: str
     user_id: str
     query: str
     conversation_history: List[Dict[str, Any]] = []
@@ -27,7 +27,7 @@ class CreatePolicyRequest(BaseModel):
     """
     用于 /create_policy 接口的请求体
     """
-    tenant_id: str
+    policy_id: str
     user_table: str  # 员工表 (jsonl) 的完整内容
     db_schema: str   # 数据库描述文件 (sql) 的完整内容
     nl_policy: str   # 自然语言规则 (txt) 的完整内容
@@ -39,12 +39,13 @@ class UpdateFileType(str, Enum):
     sql = "sql"
     user_table = "user_table"
     policy = "policy" # 代表 "nl_policy"
+    rego = "rego"
 
 class UpdatePolicyRequest(BaseModel):
     """
     用于 /update_policy 接口的请求体
     """
-    tenant_id: str
+    policy_id: str
     file_type: UpdateFileType # 必须是 "sql", "user_table", 或 "policy"
     content: str            # 要更新的文件内容
 
@@ -53,6 +54,6 @@ class PolicyUpdateResponse(BaseModel):
     create/update 接口的通用成功响应
     """
     status: str
-    tenant_id: str
+    policy_id: str
     files_updated: List[str]
     message: str

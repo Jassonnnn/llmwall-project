@@ -1,4 +1,4 @@
-#仅仅用来测试 （接口用）
+#仅仅用来测试
 package riddle_2.access
 
 import rego.v1

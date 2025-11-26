@@ -10,9 +10,9 @@ from .policy_manager import PolicyManager
 from opa_client import OpaClient
 
 # --- 缓存 ---
-# (key = tenant_id, value = dict)
+# (key = policy_id, value = dict)
 _employee_cache: Dict[str, Dict[str, Any]] = {}
-# (key = tenant_id, value = str)
+# (key = policy_id, value = str)
 _policy_cache: Dict[str, str] = {}
 # (key = file_path, value = asyncio.Lock)
 _file_locks = defaultdict(asyncio.Lock)
@@ -32,12 +32,12 @@ class PermissionController:
         """
         self.policy_manager = policy_manager
         self.opa_client = opa_client
-    # (已移除) self.llm_model，因为它已在 acompletion 调用中硬编码
+    
     print("[PermissionController] 初始化完成 (新版本, 自定义 LLM 配置)")
 
     # --- 核心检查方法 ---
 
-    async def check_query(self, tenant_id: str, user_id: str, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
+    async def check_query(self, policy_id: str, user_id: str, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """
         (新) 核心检查方法：
         1. 获取用户信息
@@ -50,18 +50,18 @@ class PermissionController:
         if conversation_history is None:
             conversation_history = []
             
-        print(f"[check_query] 开始处理 Tenant: {tenant_id}, User: {user_id}")
+        print(f"[check_query] 开始处理 Policy: {policy_id}, User: {user_id}")
 
         # 1. 获取用户信息 (来自缓存或文件)
-        user_info = await self._get_user_attributes(tenant_id, user_id)
+        user_info = await self._get_user_attributes(policy_id, user_id)
         if not user_info:
-            print(f"错误: 无法找到用户 {user_id} 在租户 {tenant_id} 中")
-            return {"decision": "DENY", "reason": "User or Tenant not found."}
+            print(f"错误: 无法找到用户 {user_id} 在策略组 {policy_id} 中")
+            return {"decision": "DENY", "reason": "User or Policy ID not found."}
 
         # 2. 将自然语言解析为 SQL-like JSON (使用 V1 demo 的提示词)
         try:
             parsed_query_request = await self._parse_query_to_json(
-                query, user_id, conversation_history, tenant_id # (新增) 传入 tenant_id
+                query, user_id, conversation_history, policy_id # (修改) 传入 policy_id
             )
             print(f"[check_query] LLM 解析结果: {parsed_query_request}")
         except Exception as e:
@@ -70,29 +70,23 @@ class PermissionController:
 
         # 3. 构建 OPA 输入 (使用 V1 demo 的格式)
         opa_input = {
-            "input": {
-                "user": user_info,
-                "query_request": parsed_query_request
-            }
-        }
-        
-        opa_input = {
             "user": user_info,
             "query_request": parsed_query_request
         }
+        print("opa_input:", json.dumps(opa_input, indent=2, ensure_ascii=False))
 
         # 4. 获取 Rego 策略 (来自缓存或文件)
-        rego_policy = await self._get_policy(tenant_id)
+        rego_policy = await self._get_policy(policy_id)
         if not rego_policy:
-            print(f"错误: 租户 {tenant_id} 缺少 'policy.rego' 文件")
-            return {"decision": "DENY", "reason": "Policy file not found for tenant."}
+            print(f"错误: 策略组 {policy_id} 缺少 'policy.rego' 文件")
+            return {"decision": "DENY", "reason": "Policy file not found."}
             
         # 5. 评估策略
-        # 我们查询 'sqlopa.access.result'，这与 V1 demo 和 PolicyManager 中的 LLM 生成提示词一致
-        policy_data_path = f"{tenant_id}.access.result" 
+        # 我们查询 '{policy_id}.access.result'
+        policy_data_path = f"{policy_id}.access.result" 
         try:
             opa_result = await self.opa_client.evaluate_policy(
-                tenant_id=tenant_id,
+                policy_id=policy_id, # (修改) 传入 policy_id
                 input_data=opa_input,
                 rego_policy=rego_policy,
                 policy_data_path=policy_data_path
@@ -153,7 +147,7 @@ class PermissionController:
 
     # --- LLM 辅助方法 ---
 
-    async def _parse_query_to_json(self, natural_query: str, user_id: str, conversation_history: List[Dict], tenant_id: str) -> Dict[str, Any]:
+    async def _parse_query_to_json(self, natural_query: str, user_id: str, conversation_history: List[Dict], policy_id: str) -> Dict[str, Any]:
         """
         (新) 使用 LLM 将自然语言解析为 SQL-like JSON
         (基于用户提供的 llm_parser.py)
@@ -161,7 +155,7 @@ class PermissionController:
         """
         
         # (可选) 动态从 PolicyManager 加载 schema 描述
-        schema_desc = await self._get_schema_description(tenant_id)
+        schema_desc = await self._get_schema_description(policy_id)
         if not schema_desc:
              schema_desc = "employees表包含列：id, name, department, salary, position" # 备用硬编码
 
@@ -238,7 +232,7 @@ class PermissionController:
 
 重写规则：
 1. 只保留允许的列
-2. 添加必要的行级过滤条件 (例如，如果 row_constraints 是 {"id": "emp001"}，查询应被重写为查询该特定用户的信息)
+2. 添加必要的行级过滤条件 (例如，如果 row_constraints 是 {"id": "emp001"}，查询应被重写为查询该特定用户的信息),但如果row_constraints为空，则不添加任何行级过滤条件
 3. 保持自然语言的表达方式
 """
         
@@ -270,16 +264,16 @@ class PermissionController:
 
     # --- 缓存和文件 I/O 辅助方法 ---
 
-    async def _get_user_attributes(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def _get_user_attributes(self, policy_id: str, user_id: str) -> Dict[str, Any]:
         """
         从缓存或文件中获取特定用户的信息
         """
-        if tenant_id not in _employee_cache:
+        if policy_id not in _employee_cache:
             # 缓存未命中，需要从文件加载
-            filepath = self.policy_manager.get_employee_filepath(tenant_id)
+            filepath = self.policy_manager.get_employee_filepath(policy_id)
             async with _file_locks[filepath]:
                 # 再次检查，防止在等待锁时已被其他协程加载
-                if tenant_id not in _employee_cache:
+                if policy_id not in _employee_cache:
                     print(f"缓存未命中: 正在从 {filepath} 加载员工表...")
                     try:
                         employee_map = {}
@@ -288,43 +282,43 @@ class PermissionController:
                                 if line.strip():
                                     data = json.loads(line)
                                     employee_map[data["user_id"]] = data
-                        _employee_cache[tenant_id] = employee_map
+                        _employee_cache[policy_id] = employee_map
                     except FileNotFoundError:
                         print(f"错误: 员工文件 {filepath} 未找到")
-                        _employee_cache[tenant_id] = {} # 存入空字典防止重复读取
+                        _employee_cache[policy_id] = {} # 存入空字典防止重复读取
                     except Exception as e:
                         print(f"错误: 解析员工文件 {filepath} 失败 - {e}")
-                        _employee_cache[tenant_id] = {}
+                        _employee_cache[policy_id] = {}
             
         # 从缓存中查找用户
-        return _employee_cache.get(tenant_id, {}).get(user_id)
+        return _employee_cache.get(policy_id, {}).get(user_id)
 
-    async def _get_policy(self, tenant_id: str) -> str:
+    async def _get_policy(self, policy_id: str) -> str:
         """
         从缓存或文件中获取租户的 Rego 策略字符串
         """
-        if tenant_id not in _policy_cache:
-            filepath = self.policy_manager.get_policy_filepath(tenant_id)
+        if policy_id not in _policy_cache:
+            filepath = self.policy_manager.get_policy_filepath(policy_id)
             async with _file_locks[filepath]:
-                if tenant_id not in _policy_cache:
+                if policy_id not in _policy_cache:
                     print(f"缓存未命中: 正在从 {filepath} 加载 Rego 策略...")
                     try:
                         with open(filepath, "r", encoding="utf-8-sig") as f:
-                            _policy_cache[tenant_id] = f.read()
+                            _policy_cache[policy_id] = f.read()
                     except FileNotFoundError:
                         print(f"错误: 策略文件 {filepath} 未找到")
-                        _policy_cache[tenant_id] = "" # 存入空字符串防止重复读取
+                        _policy_cache[policy_id] = "" # 存入空字符串防止重复读取
                     except Exception as e:
                         print(f"错误: 读取策略文件 {filepath} 失败 - {e}")
-                        _policy_cache[tenant_id] = ""
+                        _policy_cache[policy_id] = ""
 
-        return _policy_cache.get(tenant_id)
+        return _policy_cache.get(policy_id)
 
-    async def _get_schema_description(self, tenant_id: str) -> str:
+    async def _get_schema_description(self, policy_id: str) -> str:
         """
         (新增) 尝试从文件加载 schema 描述
         """
-        filepath = self.policy_manager.get_schema_filepath(tenant_id)
+        filepath = self.policy_manager.get_schema_filepath(policy_id)
         try:
             # 注意: 这是一个非I/O密集型读取，暂不加锁
             if filepath.exists():
@@ -336,21 +330,21 @@ class PermissionController:
             print(f"Warning: 读取 schema 文件失败 ({filepath}): {e}")
             return ""
 
-    async def invalidate_cache(self, tenant_id: str):
+    async def invalidate_cache(self, policy_id: str):
         """异步接口，供路由层失效指定租户缓存"""
-        self.clear_cache(tenant_id)
+        self.clear_cache(policy_id)
 
-    def clear_cache(self, tenant_id: str):
+    def clear_cache(self, policy_id: str):
         """
         (公开方法) 清除指定租户的缓存
         (由 setup_routes.py 在文件更新时调用)
         """
-        if tenant_id in _employee_cache:
-            del _employee_cache[tenant_id]
-            print(f"缓存清除: 员工表 ({tenant_id})")
-        if tenant_id in _policy_cache:
-            del _policy_cache[tenant_id]
-            print(f"缓存清除: 策略 ({tenant_id})")
+        if policy_id in _employee_cache:
+            del _employee_cache[policy_id]
+            print(f"缓存清除: 员工表 ({policy_id})")
+        if policy_id in _policy_cache:
+            del _policy_cache[policy_id]
+            print(f"缓存清除: 策略 ({policy_id})")
             
 import tempfile
 import logging
@@ -371,7 +365,8 @@ async def main_test():
         print(f"使用临时目录: {temp_dir_path}")
         
         # 2. 定义模拟数据
-        tenant_id = "e2e_test_tenant"
+        # (修改) tenant_id -> policy_id
+        policy_id = "e2e_test_policy"
         
         mock_employees = (
             '{"user_id": "emp_manager", "user_role": "manager", "attributes": {"department": "Sales"}}\n'
@@ -380,8 +375,8 @@ async def main_test():
         
         mock_schema = "CREATE TABLE employees (id varchar(100), name varchar(100), salary int, department varchar(50));"
         
-        # 一个模拟的 Rego 策略
-        mock_rego_policy = """package e2e_test_tenant.access
+        # 一个模拟的 Rego 策略 (Package name 也要相应修改以符合逻辑，虽然 OPA 不强制，但为了清晰)
+        mock_rego_policy = """package e2e_test_policy.access
 
 import rego.v1
 
@@ -472,23 +467,11 @@ result := {
 """
         
         # 3. 初始化服务
-        # (重要) OPAClient 在我们的项目中是模拟的, 它会返回空字典。
-        # 我们需要一个能 *真正* 执行 Rego 的 OPAClient。
-        #
-        # 解决方案: 我将在这里 *Monkey-Patch* (猴子补丁) OPAClient
-        # 以便它使用真实的 'opa_python_client' (如果已安装)
-        
         try:
             from opa_client import OpaClient
             
-            # 创建一个 *真实的* OPAClient (如果 pip install opa-python-client)
-            # 这需要一个 OPA 服务在 http://localhost:8181 运行
-            # $ opa run -s
-            
-            # (已修正) 将 host 和 port 分开
             real_opa_instance = OpaClient(host="localhost", port=8181)
             
-            # 检查 OPA 服务是否在运行
             if not real_opa_instance.check_health():
                 raise ConnectionError("OPA 服务未在 http://localhost:8181 运行")
 
@@ -496,24 +479,22 @@ result := {
             class OpaClientWrapper(OpaClient):
                 async def evaluate_policy(
                     self,
-                    tenant_id: str,
+                    policy_id: str, # (修改) tenant_id -> policy_id
                     input_data: dict,
                     rego_policy: str,
                     policy_data_path: str = "sqlopa.access.result",
                 ) -> dict:
                     # 1. 动态推送策略
-                    policy_id = f"test_{tenant_id}"
-                    # print(f"rego策略:\n{rego_policy}\n")
+                    # (修改) endpoint 使用 policy_id
                     real_opa_instance.update_policy_from_string(
                         new_policy = rego_policy,
                         endpoint = policy_id
                     )
                     
-                    # print(input_data)
-                    
                     # 2. 评估
                     package_path, _, rule_name = policy_data_path.rpartition(".")
-                    package_path = package_path.replace(".", "/") if package_path else f"{tenant_id}/access"
+                    # (修改) 默认路径 fallback
+                    package_path = package_path.replace(".", "/") if package_path else f"{policy_id}/access"
                     result_full = real_opa_instance.query_rule(
                         input_data=input_data,
                         package_path=package_path,
@@ -529,13 +510,10 @@ result := {
             print(f"\n*** 警告: 未找到 'opa-python-client' 或 OPA 服务未运行 ({e}) ***")
             print("*** 将使用 PolicyManager 中的 Rego LLM 生成提示词进行 *模拟* OPA 评估 ***\n")
             
-            # 回退到使用模拟 OPA 客户端
-            # (注意: 我们的 opa_client.py 模拟器是空的, 
-            #  所以我们在这里模拟 V1 demo 的返回)
             class MockOPAClient(OpaClient):
                 async def evaluate_policy(
                     self,
-                    tenant_id: str,
+                    policy_id: str, # (修改) tenant_id -> policy_id
                     input_data: dict,
                     rego_policy: str,
                     policy_data_path: str,
@@ -565,11 +543,11 @@ result := {
             opa_client=opa_client
         )
         
-        # 4. 写入模拟文件
+        # 4. 写入模拟文件 (参数名修改)
         print("--- 正在设置测试文件... ---")
-        await policy_manager.update_employee_table(tenant_id, mock_employees)
-        await policy_manager.update_db_schema(tenant_id, mock_schema)
-        await policy_manager.update_rego_policy(tenant_id, mock_rego_policy)
+        await policy_manager.update_employee_table(policy_id, mock_employees)
+        await policy_manager.update_db_schema(policy_id, mock_schema)
+        await policy_manager.update_rego_policy(policy_id, mock_rego_policy)
         print("--- 测试文件设置完毕 ---")
 
         # 5. 定义测试用例
@@ -596,8 +574,9 @@ result := {
             print(f"\n{'='*20} {test['name']} {'='*20}")
             
             try:
+                # (修改) 调用 check_query 时使用 policy_id
                 result = await controller.check_query(
-                    tenant_id=tenant_id,
+                    policy_id=policy_id,
                     user_id=test["user_id"],
                     query=test["query"]
                 )
@@ -624,13 +603,8 @@ if __name__ == "__main__":
     # 2. (推荐) 启动 OPA 服务: opa run -s
     # 3. (必须) 在项目根目录运行此脚本:
     #    python -m permission_control.data.permission_controller
-    #
-    # 4. (如果 LLM 失败) 确保您的自定义 LLM 服务正在运行
-    #    ([http://124.70.213.108:7009/v1](http://124.70.213.108:7009/v1))
     
     # (新增) 修复相对导入
-    # 这一行将 'permission_control' 的父目录添加到 sys.path
-    # 使得 'from .policy_manager import ...' 可以被解析
     sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
     asyncio.run(main_test())

@@ -1,5 +1,6 @@
 import requests
 import json
+import os
 
 
 def _print_json_response(response: requests.Response):
@@ -14,13 +15,13 @@ def create_policy():
     向 /api/v1/create_policy 发送 POST 请求并打印响应。
     """
     # API 端点 URL
-    url = "http://127.0.0.1:11514/api/v1/create_policy"
+    url = "http://127.0.0.1:8888/api/v1/create_policy"
 
     # 根据您提供的 schema 准备要发送的数据
-    # 您需要将 "your_tenant_id", "your_table_name", 和 "your_policy_string"
+    # 您需要将 "your_policy_id", "your_table_name", 和 "your_policy_string"
     # 替换为实际的值。
     payload = {
-        "tenant_id": "lotato",
+        "policy_id": "lotato",
         "user_table": (
             '{"user_id": "emp_manager", "user_role": "manager", "attributes": {"department": "Sales"}}\n'
             '{"user_id": "emp_regular", "user_role": "employee", "attributes": {"department": "Support"}}'
@@ -63,32 +64,42 @@ def create_policy():
 def check_query():
     """针对 /api/v1/check_query 的简单集成测试。"""
 
-    url = "http://127.0.0.1:11514/api/v1/check_query"
+    url = "http://127.0.0.1:8888/api/v1/check_query"
 
-    test_cases = [
-        {
-            "description": "管理者查看所有员工的姓名和薪资",
-            "payload": {
-                "tenant_id": "lotato",
-                "user_id": "emp_manager",
-                "query": "帮我查看所有员工的姓名和薪资",
-                "conversation_history": [],
-            },
-            "expected_status": 200,
-            "expected_decision": {"ALLOW"},
-        },
-        {
-            "description": "普通员工尝试查看所有人的薪资",
-            "payload": {
-                "tenant_id": "lotato",
-                "user_id": "emp_regular",
-                "query": "把所有员工的工资发给我",
-                "conversation_history": [],
-            },
-            "expected_status": 200,
-            "expected_decision": {"REWRITE", "DENY"},
-        },
-    ]
+    # 从环境变量或默认路径加载测试用例文件（JSON 格式）
+    test_case_file = os.environ.get(
+        "TEST_CASE_FILE",
+        "/data/ljc/llmwall-project/permission_control/data/policy_list/test_case.json",
+    )
+
+    try:
+        with open(test_case_file, "r", encoding="utf-8") as f:
+            raw_cases = json.load(f)
+        print(f"已从 {test_case_file} 加载 {len(raw_cases)} 条测试用例。")
+    except Exception as e:
+        print(f"无法加载测试用例文件 {test_case_file}：{e}")
+        raw_cases = []
+
+    # 将 JSON 中的用例标准化为脚本期望的结构
+    test_cases = []
+    for item in raw_cases:
+        # expected_decision 可以是字符串（"ALLOW" 或 "REWRITE,DENY"）或列表
+        expected = item.get("expected_decision", "")
+        if isinstance(expected, str):
+            expected_set = {s.strip().upper() for s in expected.split(",") if s.strip()}
+        elif isinstance(expected, (list, tuple, set)):
+            expected_set = {str(s).strip().upper() for s in expected}
+        else:
+            expected_set = set()
+
+        test_cases.append(
+            {
+                "description": item.get("description", f"case_{item.get('id', '')}"),
+                "payload": item.get("payload", {}),
+                "expected_status": item.get("expected_status", 200),
+                "expected_decision": expected_set,
+            }
+        )
 
     for case in test_cases:
         print("\n==============================")
@@ -127,5 +138,5 @@ def check_query():
             print(response.text)
 
 if __name__ == "__main__":
-    create_policy()
+    # create_policy()
     check_query()

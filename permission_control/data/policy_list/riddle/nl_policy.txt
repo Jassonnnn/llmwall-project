@@ -1,0 +1,20 @@
+权限策略为：
+1. **局长 (Chief)**: 拥有最高权限，可以查看所有警情信息。但对涉及个人隐私的字段（报警人电话(phone_number) 和详细地址(detailed_address)）必须进行数据脱敏。
+
+2. **总工程师 (Engineer)**: 只能查看系统维护相关字段（creator, create_time, update_time, updater, remark, data_status），且只能查询 `data_status` 为 '0' (系统数据) 的警单。
+
+3. **分析师 (Analyst)**: 拥有 **科长** 的所有权限，但额外限制为只能查询 `alarm_time` 在 **近 180 天内** 的警单。
+
+4. **科长 (Supervisor)**:
+    - **权限基础：** 拥有**警员**的所有列权限。
+    - **行级权限：** 科长可以查看 `dept_id` 与自己相同的警单 **或者** 案件类型(case_type) 为 '盗窃' 的警单。
+    - **列级权限：** 科长可以查看所有信息，但**不能**查看报警内容(alarm_content) 和处警情况(police_situation)。
+
+5. **警员 (Officer)**: 
+    - **行级限制：** 只能查看自己创建(creator) 的警单。
+    - **时间限制：** 只能查询 `alarm_time` 在 **上季度** 的警单。
+    - **列级限制：** 只能查看基础信息（alarm_number, alarm_time, police_details, jurisdiction_unit）。
+
+6. **审计员 (Auditor)**: 
+    - **行级限制：** 只能查询 `label_status` 为 '0' (未达标) 的警单。
+    - **列级排除：** 审计员可以查看所有警情字段，但**不得**查看任何与 **系统维护** 相关的字段（creator, create_time, updater, update_time, remark, data_status, label_status, deleted）。

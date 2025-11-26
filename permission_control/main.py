@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     class OpaClientWrapper(OpaClient):
         async def evaluate_policy(
             self,
-            tenant_id: str,
+            policy_id: str,
             input_data: dict,
             rego_policy: str,
             policy_data_path: str = "sqlopa.access.result",
@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
             # print(f"rego策略:\n{rego_policy}\n")
             opa_instance.update_policy_from_string(
                 new_policy = rego_policy,
-                endpoint = tenant_id
+                endpoint = policy_id
             )
             
             # print(input_data)
@@ -104,4 +104,4 @@ async def read_root():
     return {"status": "ok", "message": "Permission Control Service is running."}
 
 
-# uvicorn permission_control.main:app --port 8888 --reload
+#uvicorn main:app --port 8888 --reload

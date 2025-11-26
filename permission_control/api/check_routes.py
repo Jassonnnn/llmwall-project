@@ -11,8 +11,8 @@ from .schemas import ChatQueryRequest, ChatQueryResponse
 
 router = APIRouter()
 
-_JAILBREAK_ENDPOINT = "http://127.0.0.1:11514/check_input"
-_JAILBREAK_PARAMS = {"detect_jailbreak": {"on_fail": "exception"}}
+_JAILBREAK_ENDPOINT = "http://127.0.0.1:11451/check"
+_JAILBREAK_PARAMS = {"prompt_guard": {"on_fail": "exception"}}
 
 
 async def _run_jailbreak_guard(text: str) -> dict:
@@ -20,7 +20,7 @@ async def _run_jailbreak_guard(text: str) -> dict:
 
     payload = {
         "text": text,
-        "checks": ["detect_jailbreak"],
+        "checks": ["prompt_guard"],
         "params": _JAILBREAK_PARAMS,
     }
 
@@ -54,7 +54,7 @@ async def check_query(
 
     try:
         result = await controller.check_query(
-            tenant_id=request.tenant_id,
+            policy_id=request.policy_id,
             user_id=request.user_id,
             query=request.query,
             conversation_history=request.conversation_history,
