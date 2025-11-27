@@ -5,143 +5,193 @@ import re
 from litellm import acompletion
 from pathlib import Path
 from collections import defaultdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 class PolicyManager:
+    """
+    (V2 架构) 策略文件管理器
+    职责: 负责所有策略和数据文件的写入 (Write)，以及 智能体自修正 (Agentic Workflow) 的编排。
+    """
     def __init__(self, raw_data_path: str = "data/policy_list"):
+        # 原始策略/Schema文件的路径
         self.raw_base_path = Path(raw_data_path)
         os.makedirs(self.raw_base_path, exist_ok=True)
+        
+        # 为每个策略组(原租户)的文件提供一个锁，以防止 *写入* 冲突
         self.policy_write_locks = defaultdict(asyncio.Lock)
-        print(f"PolicyManager initialized. Root: {self.raw_base_path.resolve()}")
+        
+        print(f"PolicyManager initialized. ")
+        print(f"  -> Raw config (file) data: {self.raw_base_path.resolve()}")
 
-    # --- Path Getters ---
+    # --- Path Getters (获取文件路径) ---
+    
     def get_employee_filepath(self, policy_id: str) -> Path:
+        """获取员工表文件的路径"""
         return self.raw_base_path / policy_id / "employees.jsonl"
         
     def get_policy_filepath(self, policy_id: str) -> Path:
+        """获取策略文件的路径"""
         return self.raw_base_path / policy_id / "policy.rego"
         
     def get_schema_filepath(self, policy_id: str) -> Path:
+        """获取 Schema 文件的路径"""
         return self.raw_base_path / policy_id / "db_schema.sql"
+
+    # --- 核心逻辑：NL-to-Rego 转换入口 ---
+
+    async def _generate_rego_from_nl(self, policy_id: str, nl_policy: str, opa_client: Any = None) -> str:
+        """
+        (核心方法) 将自然语言策略转换为 Rego 策略。
+        逻辑：准备上下文 -> 判断是否有 opa_client -> 分发到简单生成或自修正生成。
+        """
+        print(f"Generating Rego from NL for policy {policy_id}...")
+        
+        # 1. 准备上下文 (Schema 和 用户示例)
+        db_schema_content = self._read_file_safe(self.get_schema_filepath(policy_id), "No db_schema.sql found.")
+        user_sample = self._read_file_safe(self.get_employee_filepath(policy_id), "No employees.jsonl found.", readline=True)
+
+        # 2. 构造通用的 System Prompt
+        system_prompt = self._get_rego_system_prompt(policy_id, db_schema_content, user_sample)
+
+        # --- 分支 A: 简单生成 (无 OPA 客户端，无法测试) ---
+        if not opa_client:
+            print("⚠️ Warning: No opa_client provided, skipping Agentic validation (Simple Generation Mode).")
+            return await self._llm_generate_initial_rego(nl_policy, system_prompt)
+
+        # --- 分支 B: 智能体自修正循环 (Agentic Workflow) ---
+        # 注意：这里现在正确传递了所有参数
+        return await self._generate_rego_with_self_correction(
+            policy_id, nl_policy, opa_client, system_prompt, db_schema_content
+        )
 
     # --- 核心升级：智能体自修正流程 (Agentic Workflow) ---
 
-    async def _generate_rego_with_self_correction(self, policy_id: str, nl_policy: str, opa_client: Any) -> str:
+    async def _generate_rego_with_self_correction(self, policy_id: str, nl_policy: str, opa_client: Any, system_prompt: str, db_schema_content: str) -> str:
         """
         智能体闭环：生成 -> 生成测试 -> 运行测试 -> 错误修正 -> 循环
         """
         print(f"🤖 [Agent] Starting self-correction loop for {policy_id}...")
         
-        # 1. 准备上下文
-        db_schema = self._read_file_safe(self.get_schema_filepath(policy_id), "No schema")
-        user_sample = self._read_file_safe(self.get_employee_filepath(policy_id), "No user data", readline=True)
+        # Step 1: 初始生成 (Draft)
+        print("✍️  [Agent] Drafting initial Rego code...")
+        current_rego = await self._llm_generate_initial_rego(nl_policy, system_prompt)
         
-        # 2. 初始生成 (Attempt 0)
-        current_rego = await self._llm_generate_initial_rego(policy_id, nl_policy, db_schema, user_sample)
-        
-        # 3. 生成测试用例 (只生成一次，作为基准)
+        # Step 2: 生成测试用例 (只生成一次，作为固定标准)
         print(f"🧪 [Agent] Generating verification test cases...")
-        test_cases = await self._llm_generate_test_cases(nl_policy, db_schema)
-        print(f"    -> Generated {len(test_cases)} test cases.")
+        test_cases = await self._llm_generate_test_cases(nl_policy, db_schema_content)
+        print(f"📋 [Agent] Generated {len(test_cases)} test cases:")
+        print(json.dumps(test_cases, indent=2, ensure_ascii=False))
+        print("-" * 50)
 
-        max_retries = 3 # 最大重试次数
+        max_retries = 5
         
         for attempt in range(max_retries):
-            print(f"🔄 [Attempt {attempt+1}/{max_retries}] Verifying Rego logic...")
+            print(f"\n🔄 [Attempt {attempt+1}/{max_retries}] Verifying Rego logic...")
+            print(f"📝 [Current Rego Code]:\n{'-'*20}\n{current_rego}\n{'-'*20}")
             
-            # 4. 运行测试 (Compilation & Logic Check)
-            failures = await self._run_verification_tests(policy_id, current_rego, test_cases, opa_client)
+            # Step 3: 运行测试 (Execution & Verification)
+            failures, pass_count, total_count = await self._run_verification_tests(policy_id, current_rego, test_cases, opa_client)
+            
+            print(f"📊 [Result] {pass_count}/{total_count} Passed.")
             
             if not failures:
                 print(f"✅ [Success] All tests passed on attempt {attempt+1}!")
                 return current_rego
             
-            # 5. 如果失败，进行修正
-            print(f"❌ [Fail] {len(failures)} tests/errors found. Asking LLM to fix...")
-            current_rego = await self._llm_fix_rego(policy_id, current_rego, failures, nl_policy)
+            # Step 4: 失败修正 (Refinement)
+            print(f"❌ [Fail] Found {len(failures)} errors. Asking LLM to fix...")
+            for i, fail in enumerate(failures, 1):
+                print(f"   ERR #{i}: {fail[:300]}..." if len(fail) > 300 else f"   ERR #{i}: {fail}")
+
+            current_rego = await self._llm_fix_rego(policy_id, current_rego, failures, nl_policy, system_prompt)
 
         print(f"⚠️ [Warning] Max retries reached. Saving last version (might have bugs).")
         return current_rego
 
     # --- LLM 交互子方法 ---
 
-    async def _llm_generate_initial_rego(self, policy_id: str, nl_policy: str, schema: str, user_sample: str) -> str:
-        """初始生成 Rego (逻辑同之前的 _generate_rego_from_nl)"""
-        # 这里复用之前的 System Prompt 逻辑
-        opa_input_example = f"""{{ "input": {{ "user": {{ "user_id": "test_u", "attributes": {user_sample} }}, "query_request": {{ "columns": ["*"] }} }} }}"""
-        
-        system_prompt = f"""
-你是一位顶级的安全策略工程师，精通 OPA Rego。
-请根据上下文生成 Rego 策略。
-1. Package 名必须是 `{policy_id}.access`。
-2. 数据库 Schema: {schema}
-3. 用户属性示例: {user_sample}
-4. 必须包含 `allowed`, `allowed_columns`, `row_constraints`, `reason`。
-5. 必须导入 `rego.v1`。
+    async def _llm_generate_initial_rego(self, nl_policy: str, system_prompt: str) -> str:
+        """
+        [优化] 初始生成 Rego
+        加强了 User Prompt，强制要求完整性、禁止 Markdown。
+        """
+        user_prompt = f"""
+任务：将以下自然语言策略转换为 OPA Rego 代码。
+
+--- 自然语言策略 (NL Policy) ---
+{nl_policy}
+
+--- 关键要求 (CRITICAL INSTRUCTIONS) ---
+1. **完整性**：生成的 Rego 必须完整包含 `package`, `import`, `default`, `roles`, `valid_row_filters` 以及核心逻辑规则。
+2. **列名全集**：必须在代码顶部定义 `all_db_columns`，必须包含 Schema 中的**所有**列名，**绝对不要省略**任何一列。
+3. **纯代码输出**：直接输出 Rego 代码文本。**严禁**使用 ```rego``` 或 ``` 包裹代码。**严禁**在代码前后添加任何解释性文字。
+4. **默认拒绝**：必须包含 `default allow := false`。
+5. **属性安全**：在定义 `roles` 映射时，确保每个角色（即使不需要排除列）都有 `excluded_columns: []` 字段，防止运行时属性缺失错误。
+
+请立即生成代码：
 """
-        user_prompt = f"请将以下自然语言策略转换为 Rego 代码：\n\n{nl_policy}\n\n只返回 Rego 代码。"
         return await self._call_llm(system_prompt, user_prompt)
 
     async def _llm_generate_test_cases(self, nl_policy: str, schema: str) -> List[Dict]:
         """生成用于验证的测试用例"""
         system_prompt = """
-你是一个QA工程师。请根据给定的 SQL Schema 和 自然语言权限策略，生成 3 个具有代表性的测试用例。
-测试用例应覆盖：允许访问(ALLOW)、行/列限制(REWRITE)、以及拒绝访问(DENY)。
+你是一个高级 QA 工程师，专门负责测试安全策略的漏洞。
+你的目标是生成一组 JSON 格式的测试用例，用于验证 OPA 策略是否符合自然语言需求。
 
-返回格式必须是纯 JSON 列表，不要Markdown：
-[
-  {
-    "description": "描述测试意图",
-    "user_role": "manager",
-    "user_id": "user_123", 
-    "mock_user_attributes": {"dept_id": 101, "jurisdiction_unit": "天河分局"}, 
-    "query_columns": ["name", "salary"],
-    "expected_decision": "ALLOW" 
-  }
-]
-(注意：expected_decision 只能是 ALLOW, REWRITE, DENY)
+### 测试用例设计原则：
+1.  **覆盖率**：必须覆盖所有角色（Chief, Supervisor, Officer 等）。
+2.  **正向测试**：生成应该被 `ALLOW` 的合法请求。
+3.  **负向测试 (关键)**：生成应该被 `DENY` 的越权请求。
+4.  **边界测试**：生成应该触发 `REWRITE` 的请求。
+
+### 输出格式要求：
+*   必须是纯 JSON 数组列表 `[...]`。
+*   **严禁**使用 Markdown 格式（不要 ```json）。
+*   JSON 字段必须包含：`description`, `user_role`, `user_id`, `mock_user_attributes` (必须符合逻辑), `query_columns`, `expected_decision`。
+*   `expected_decision` 只能是：`ALLOW`, `REWRITE`, `DENY`。
 """
         user_prompt = f"Schema:\n{schema}\n\nPolicy:\n{nl_policy}\n\n请生成测试用例 JSON:"
         response_text = await self._call_llm(system_prompt, user_prompt)
         return self._parse_json_from_llm(response_text)
 
-    async def _llm_fix_rego(self, policy_id: str, current_rego: str, failures: List[str], nl_policy: str) -> str:
+    async def _llm_fix_rego(self, policy_id: str, current_rego: str, failures: List[str], nl_policy: str, base_system_prompt: str) -> str:
         """根据错误修正 Rego"""
         error_report = "\n".join(failures)
-        system_prompt = f"你是 Rego 修复专家。包名必须是 {policy_id}.access。请只返回修复后的完整 Rego 代码。"
         user_prompt = f"""
-当前 Rego 代码存在逻辑错误或编译错误，未能通过测试。
+当前 Rego 代码未能通过测试。请根据失败报告修复代码。
 
 --- 原始需求 (NL) ---
 {nl_policy}
 
---- 当前代码 ---
+--- 当前有问题代码 ---
 {current_rego}
 
 --- 失败报告 ---
 {error_report}
 
-请分析失败原因，并重写 Rego 代码以修复这些问题。确保语法正确且符合逻辑。
+请分析失败原因，并重写 Rego 代码以修复这些问题。
+1. 确保 `allowed_columns` 逻辑正确处理通配符和排除逻辑。
+2. 确保 `row_constraints` 逻辑正确处理 OR/AND 关系。
+3. 确保所有角色属性存在性检查（例如 excluded_columns）。
+4. 修复任何 OPA 编译错误。
+
+请只返回修复后的完整 Rego 代码。
 """
-        return await self._call_llm(system_prompt, user_prompt)
+        return await self._call_llm(base_system_prompt, user_prompt)
 
-    # --- 执行与验证子方法 ---
+    # --- OPA 执行与验证方法 ---
 
-    async def _run_verification_tests(self, policy_id: str, rego_code: str, test_cases: List[Dict], opa_client: Any) -> List[str]:
-        """执行测试用例并返回失败报告"""
+    async def _run_verification_tests(self, policy_id: str, rego_code: str, test_cases: List[Dict], opa_client: Any) -> Tuple[List[str], int, int]:
         failures = []
+        pass_count = 0
+        total_count = len(test_cases)
         
-        # 1. 尝试推送到 OPA (检查编译错误)
         try:
-            # 使用 OPA 包装器的 update_policy_from_string 方法
-            # 注意：这里我们使用 policy_id 作为 endpoint，这会覆盖当前的策略（如果是更新的话）
-            # 在创建阶段这是可以接受的。
             opa_client.update_policy_from_string(new_policy=rego_code, endpoint=policy_id)
         except Exception as e:
-            return [f"OPA Compilation Error (Syntax Invalid): {str(e)}"]
+            return [f"OPA Compilation Error (Syntax Invalid): {str(e)}"], 0, total_count
 
-        # 2. 循环执行逻辑测试
-        for case in test_cases:
+        for i, case in enumerate(test_cases, 1):
             input_data = {
                 "input": {
                     "user": {
@@ -163,32 +213,34 @@ class PolicyManager:
                 )
                 opa_res = result.get("result", {})
                 
-                # 简化的结果判定逻辑 (模拟 PermissionController 的判定)
                 actual_decision = "DENY"
                 if opa_res.get("allowed", False):
-                    # 如果 allowed=true，检查是否有约束
                     if not opa_res.get("row_constraints") and len(opa_res.get("allowed_columns", [])) > 0:
-                         # 这里做个简化假设：没有行约束且有列，就算是 ALLOW/REWRITE (此处不细分，主要抓 DENY 错误)
-                         # 为了严谨，如果 expected 是 REWRITE，只要不是 DENY 就算过
-                         actual_decision = "ALLOW_OR_REWRITE" 
+                         actual_decision = "ALLOW"
                     else:
-                         actual_decision = "ALLOW_OR_REWRITE"
+                         actual_decision = "REWRITE"
                 
                 expected = case["expected_decision"]
                 
-                # 逻辑比对：
-                # 如果预期是 DENY，但实际 ALLOW 了 -> 错误 (安全漏洞)
+                is_fail = False
+                fail_msg = ""
+
                 if expected == "DENY" and actual_decision != "DENY":
-                    failures.append(f"Case '{case['description']}': Expected DENY (Secure), but got ALLOWED/REWRITE. OPA Output: {json.dumps(opa_res)}")
-                
-                # 如果预期是 ALLOW/REWRITE，但实际 DENY 了 -> 错误 (功能不可用)
+                    is_fail = True
+                    fail_msg = f"Expected DENY, got {actual_decision}. OPA Output: {json.dumps(opa_res)}"
                 elif expected != "DENY" and actual_decision == "DENY":
-                     failures.append(f"Case '{case['description']}': Expected Access, but got DENY. Reason: {opa_res.get('reason')}")
+                    is_fail = True
+                    fail_msg = f"Expected {expected}, got DENY. Reason: {opa_res.get('reason')}"
+                
+                if is_fail:
+                    failures.append(f"Test #{i} ('{case['description']}'): {fail_msg}")
+                else:
+                    pass_count += 1
                 
             except Exception as e:
-                failures.append(f"Case '{case['description']}' execution error: {str(e)}")
+                failures.append(f"Test #{i} Execution Error: {str(e)}")
 
-        return failures
+        return failures, pass_count, total_count
 
     # --- 基础工具方法 ---
 
@@ -204,15 +256,19 @@ class PolicyManager:
                 temperature=0.0
             )
             content = response.choices[0].message.content
-            content = re.sub(r"```rego\n", "", content, flags=re.IGNORECASE)
-            content = re.sub(r"```json\n", "", content, flags=re.IGNORECASE)
-            content = re.sub(r"```", "", content).strip()
-            return content
+            # 强制提取代码块
+            code_block_pattern = r"```(?:rego)?\s*(.*?)```"
+            match = re.search(code_block_pattern, content, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+            else:
+                content = re.sub(r"```rego", "", content)
+                content = re.sub(r"```", "", content)
+                return content.strip()
         except Exception as e:
             raise RuntimeError(f"LLM Call Failed: {e}")
 
     def _parse_json_from_llm(self, text: str) -> List[Dict]:
-        """解析 JSON"""
         try:
             match = re.search(r'\[.*\]', text, re.DOTALL)
             if match: return json.loads(match.group())
@@ -228,7 +284,152 @@ class PolicyManager:
         except: pass
         return default
 
-    # --- 公共接口 (Write Methods) ---
+    def _get_rego_system_prompt(self, policy_id, schema, user_sample):
+        """获取完整的 System Prompt (包含详细的 Rego 模板)"""
+        opa_input_example = f"""
+# OPA Input 结构示例
+{{
+  "input": {{
+    "user": {{ "user_id": "u1", "attributes": {user_sample} }},
+    "query_request": {{ "columns": ["salary"], "query_type": "select" }}
+  }}
+}}
+"""
+        return f"""
+你是一位顶级的安全策略工程师，精通 OPA (Open Policy Agent) 及其 Rego 语言。
+你的核心任务是将用户提供的自然语言 (NL) 规则，转换为一个**完整、健壮且可立即执行的 Rego 策略文件**。
+
+---
+### 核心指令
+
+你的回答**必须**从 `package {policy_id}.access` 这一行开始，并包含一个完整的 Rego 策略。
+你**必须**严格遵循下面的代码结构模板，**不要修改模板中的核心逻辑（特别是列访问逻辑）**，只需要根据用户的 NL 规则填充 `roles` 和 `row_constraints` 部分。
+
+---
+### 上下文信息
+1. **数据库 Schema**: 
+{schema}
+
+2. **用户属性示例**: 
+{user_sample}
+
+3. **租户 ID**: {policy_id}
+
+---
+### 最终 Rego 代码结构 (必须严格复制并填充)
+
+```rego
+package {policy_id}.access
+
+import rego.v1
+
+# 1. 默认值
+default allow := false
+default allowed_columns := []
+default row_constraints := {{}}
+default reason := "Access denied by default. No rules matched."
+
+# --- 关键：必须从 Schema 中提取所有列名，填入这里 ---
+all_db_columns := [
+    # 请根据 SQL Schema 填入所有列名，例如 "id", "name", "salary"...
+]
+
+# 2. 角色定义 (请根据 NL 规则填充这里)
+# 注意：key 必须是小写 (例如 "manager")，与 user_role 匹配
+roles := {{
+    # 示例模板:
+    # "role_name": {{
+    #     "description": "描述",
+    #     "allowed_columns": all_db_columns, # 或具体列表 ["id", "name"]
+    #     "row_filter": "filter_name",
+    #     "excluded_columns": [] # 如果没有排除，必须留空数组
+    # }}
+}}
+
+# 3. 辅助变量
+user_role := input.user.user_role
+user_id := input.user.user_id
+role_config := roles[user_role]
+
+# 3b. 有效过滤器注册 (请将你用到的 row_filter 名字加进去)
+valid_row_filters := {{
+    "all", "self_only"
+    # ... 添加你的 filter ...
+}}
+
+# 4. 列访问逻辑 (核心逻辑 - 请勿修改结构)
+allowed_columns := final_allowed if {{
+    user_role := input.user.user_role
+    role_config := roles[user_role]
+    
+    # 1. 确定基准列集
+    is_wildcard_allowed := true if {{
+        some idx; role_config.allowed_columns[idx] == "*"
+    }} else := false
+
+    base_columns_set := set(all_db_columns) if {{
+        is_wildcard_allowed
+    }} else := set(role_config.allowed_columns)
+
+    # 2. 应用黑名单 (excluded_columns)
+    blacklisted := set(role_config.excluded_columns)
+    base_columns_after_exclusion := base_columns_set - blacklisted
+
+    # 3. 应用请求交集
+    requested := set(input.query_request.columns)
+    requested_is_wildcard := true if {{
+        some idx; input.query_request.columns[idx] == "*"
+    }} else := false
+    
+    final_allowed_set := base_columns_after_exclusion & requested if {{
+        not requested_is_wildcard
+    }} else := base_columns_after_exclusion
+
+    final_allowed := array.sort(array.concat([], final_allowed_set))
+    true
+}}
+
+# 5. 行访问逻辑 (请根据 NL 规则编写具体实现)
+
+# 示例：无限制
+row_constraints := {{}} if {{ role_config.row_filter == "all" }}
+
+# 示例：仅自己
+row_constraints := {{"id": user_id}} if {{ role_config.row_filter == "self_only" }}
+
+# ---在此处根据 NL 规则添加更多 row_constraints---
+# 例如: 
+# row_constraints := {{"dept_id": input.user.dept_id}} if {{ role_config.row_filter == "dept_match" }}
+
+
+# 5b. 拒绝无效 row_filter
+row_constraints := {{"deny": true}} if {{
+    role_config
+    not role_config.row_filter in valid_row_filters
+}}
+
+# 6. 最终裁决
+allow if {{
+    role_config
+    count(allowed_columns) > 0
+    not row_constraints.deny
+}}
+
+# 7. 决策理由
+reason := sprintf("Access Granted for %s", [role_config.description]) if {{ allow }}
+reason := "Access Denied: This role is not defined in the policy." if {{ not allow; not role_config }}
+reason := "Access Denied: Column restriction." if {{ not allow; role_config; count(allowed_columns) == 0 }}
+reason := "Access Denied: Row restriction." if {{ not allow; role_config; row_constraints.deny }}
+
+# 8. 输出结果
+result := {{
+    "allowed": allow,
+    "allowed_columns": allowed_columns,
+    "row_constraints": row_constraints,
+    "reason": reason
+}}
+"""
+# --- 公共接口 (Write Methods) ---
 
     async def update_nl_policy(self, policy_id: str, content: str, opa_client: Any = None) -> str:
         """
@@ -238,34 +439,34 @@ class PolicyManager:
             # 1. 保存 NL 文件
             nl_file_path = await self._save_raw_file_unlocked(policy_id, "nl_policy.txt", content)
             
-            # 2. 生成 Rego (带自修正)
-            if opa_client:
-                try:
-                    # 调用自修正流程
-                    rego_content = await self._generate_rego_with_self_correction(policy_id, content, opa_client)
-                    
-                    # 3. 保存最终通过验证的 Rego
-                    await self._save_raw_file_unlocked(policy_id, "policy.rego", rego_content)
+            # 2. 生成 Rego (统一调用 _generate_rego_from_nl)
+            print(f"NL policy updated. Triggering Rego generation for {policy_id}...")
+            try:
+                # 无论是否传入 opa_client，都调用此入口，函数内部会判断
+                rego_content = await self._generate_rego_from_nl(policy_id, content, opa_client)
+                
+                # 3. 保存生成的Rego策略
+                await self._save_raw_file_unlocked(policy_id, "policy.rego", rego_content)
+                
+                if opa_client:
                     print(f"🎉 [Agent] Successfully saved validated Rego policy for {policy_id}")
-                except Exception as e:
-                    print(f"❌ [Agent] Critical Error in Rego Generation: {e}")
-                    # 此时文件系统上的 policy.rego 可能是旧的，或者是空的，视之前状态而定
-                    raise e 
-            else:
-                print("⚠️ Warning: No opa_client provided, skipping Agentic Generation.")
-                # Fallback (旧逻辑，可选)
-                # rego_content = await self._llm_generate_initial_rego(...)
-                # await self._save_raw_file_unlocked(policy_id, "policy.rego", rego_content)
+                else:
+                    print(f"✅ Successfully saved Rego policy (Simple Mode) for {policy_id}")
+                    
+            except Exception as e:
+                print(f"Error during auto-generation of Rego: {e}")
+                # 抛出异常通知上层
+                raise e
             
             return str(nl_file_path)
 
-    # ... (update_employee_table, update_db_schema, update_rego_policy 等保持不变) ...
-    
     async def _save_raw_file_unlocked(self, policy_id: str, file_name: str, content: str) -> Path:
+        """非锁定版本，供 update_nl_policy 内部使用"""
         policy_path = self.raw_base_path / policy_id
         if not policy_path.exists():
             policy_path.mkdir(parents=True, exist_ok=True)
         file_path = policy_path / file_name
+        print(f"Writing raw file: {file_path}")
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
         return file_path

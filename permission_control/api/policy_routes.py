@@ -1,26 +1,22 @@
 """
 (新文件) 策略管理 API 路由
-- 包含 create_policy 和 update_policy
+- 包含 create_policy 和 update_policy 以及 upload_file
 """
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from enum import Enum
-from typing import List
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
-from .schemas import UpdateFileType, PolicyUpdateResponse
+from typing import List
 
-# 导入服务和依赖注入
-from data.policy_manager import PolicyManager
-from data.permission_controller import PermissionController
-from main import get_policy_manager, get_permission_controller
-
-# 导入新的 Schemas (将在 schemas.py 中定义)
+# 导入新的 Schemas
 from .schemas import (
     CreatePolicyRequest, 
     UpdatePolicyRequest, 
     PolicyUpdateResponse,
     UpdateFileType
 )
+
+# 导入服务和依赖注入
+from data.policy_manager import PolicyManager
+from data.permission_controller import PermissionController
+from main import get_policy_manager, get_permission_controller
 
 router = APIRouter()
 
@@ -33,7 +29,7 @@ async def create_policy(
 ):
     """
     接收租户ID、用户表和自然语言规则，并保存所有文件。
-    这将自动触发 policy.rego 的生成。
+    这将自动触发基于 Agent 的 Rego 生成与验证循环。
     """
     try:
         files_updated = []
@@ -46,8 +42,15 @@ async def create_policy(
         schema_path = await policy_manager.update_db_schema(request.policy_id, request.db_schema)
         files_updated.append(schema_path)
 
-        # 3. 保存自然语言规则 (这将自动触发 Rego 生成和保存)
-        nl_path = await policy_manager.update_nl_policy(request.policy_id, request.nl_policy)
+        # 3. 保存自然语言规则 (自动触发 Agentic Rego 生成)
+        # --- [关键修改] 传入 opa_client 以开启自修正 ---
+        nl_path = await policy_manager.update_nl_policy(
+            request.policy_id, 
+            request.nl_policy,
+            opa_client=controller.opa_client 
+        )
+        # ---------------------------------------------
+        
         files_updated.append(nl_path)
         # policy.rego 也会被创建
         files_updated.append(str(policy_manager.get_policy_filepath(request.policy_id)))
@@ -59,7 +62,7 @@ async def create_policy(
             status="success",
             policy_id=request.policy_id,
             files_updated=files_updated,
-            message="Policy created, files saved, and Rego generated."
+            message="Policy created, files saved, and Rego generated (validated)."
         )
         
     except Exception as e:
@@ -76,8 +79,8 @@ async def update_policy(
     根据 'file_type' 更新租户的单个文件。
     - sql: 更新 db_schema.sql
     - user_table: 更新 employees.jsonl
-    - policy: 更新 nl_policy.txt (并触发 Rego 重新生成)
-    - rego : 只更新rego文件（注意，需要把整段 Rego 代码变成 单行字符串）
+    - policy: 更新 nl_policy.txt (并触发 Rego 重新生成和验证)
+    - rego : 只更新rego文件（直接写入，不触发 LLM）
     """
     try:
         file_path = ""
@@ -90,9 +93,16 @@ async def update_policy(
             file_path = await policy_manager.update_employee_table(request.policy_id, request.content)
             
         elif request.file_type == UpdateFileType.policy:
-            # 更新自然语言策略 (这将自动触发 Rego 重新生成)
-            file_path = await policy_manager.update_nl_policy(request.policy_id, request.content)
-        # 【新增】处理 纯 Rego 代码 (直接写入)
+            # 更新自然语言策略，触发 Agentic 生成
+            # --- [关键修改] 传入 opa_client ---
+            file_path = await policy_manager.update_nl_policy(
+                request.policy_id, 
+                request.content,
+                opa_client=controller.opa_client
+            )
+            # --------------------------------
+
+        # 处理 纯 Rego 代码 (直接写入)
         elif request.file_type == UpdateFileType.rego:
             # 调用 PolicyManager 中已有的 update_rego_policy 方法
             file_path = await policy_manager.update_rego_policy(request.policy_id, request.content)
@@ -107,13 +117,12 @@ async def update_policy(
         return PolicyUpdateResponse(
             status="success",
             policy_id=request.policy_id,
-            files_updated=[file_path],
+            files_updated=[str(file_path)],
             message=f"File '{request.file_type.value}' updated successfully."
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update policy: {e}")
-    
     
     
 # --- （新增接口）通过文件上传更新策略 ---
@@ -144,7 +153,13 @@ async def upload_file(
             file_path = await policy_manager.update_employee_table(policy_id, content_str)
             
         elif file_type == UpdateFileType.policy:
-            file_path = await policy_manager.update_nl_policy(policy_id, content_str)
+            # --- [关键修改] 传入 opa_client ---
+            file_path = await policy_manager.update_nl_policy(
+                policy_id, 
+                content_str,
+                opa_client=controller.opa_client
+            )
+            # --------------------------------
             
         elif file_type == UpdateFileType.rego:
             file_path = await policy_manager.update_rego_policy(policy_id, content_str)
