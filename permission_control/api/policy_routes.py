@@ -43,7 +43,7 @@ async def create_policy(
         files_updated.append(schema_path)
 
         # 3. 保存自然语言规则 (自动触发 Agentic Rego 生成)
-        # --- [关键修改] 传入 opa_client 以开启自修正 ---
+        # --- 传入 opa_client 以开启自修正 ---
         nl_path = await policy_manager.update_nl_policy(
             request.policy_id, 
             request.nl_policy,
@@ -94,7 +94,7 @@ async def update_policy(
             
         elif request.file_type == UpdateFileType.policy:
             # 更新自然语言策略，触发 Agentic 生成
-            # --- [关键修改] 传入 opa_client ---
+            # --- 传入 opa_client ---
             file_path = await policy_manager.update_nl_policy(
                 request.policy_id, 
                 request.content,
@@ -153,14 +153,14 @@ async def upload_file(
             file_path = await policy_manager.update_employee_table(policy_id, content_str)
             
         elif file_type == UpdateFileType.policy:
-            # --- [关键修改] 传入 opa_client ---
+            # ---  传入 opa_client ---
             file_path = await policy_manager.update_nl_policy(
                 policy_id, 
                 content_str,
                 opa_client=controller.opa_client
             )
-            # --------------------------------
-            
+           
+                    
         elif file_type == UpdateFileType.rego:
             file_path = await policy_manager.update_rego_policy(policy_id, content_str)
 

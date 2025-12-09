@@ -59,12 +59,11 @@ class PolicyManager:
             return await self._llm_generate_initial_rego(nl_policy, system_prompt)
 
         # --- 分支 B: 智能体自修正循环 (Agentic Workflow) ---
-        # 注意：这里现在正确传递了所有参数
         return await self._generate_rego_with_self_correction(
             policy_id, nl_policy, opa_client, system_prompt, db_schema_content
         )
 
-    # --- 核心升级：智能体自修正流程 (Agentic Workflow) ---
+    # --- 智能体自修正流程 (Agentic Workflow) ---
 
     async def _generate_rego_with_self_correction(self, policy_id: str, nl_policy: str, opa_client: Any, system_prompt: str, db_schema_content: str) -> str:
         """
