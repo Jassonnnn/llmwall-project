@@ -85,13 +85,13 @@ class PolicyManager:
         max_retries = 5
         
         for attempt in range(max_retries):
-            print(f"\n🔄 [Attempt {attempt+1}/{max_retries}] Verifying Rego logic...")
-            print(f"📝 [Current Rego Code]:\n{'-'*20}\n{current_rego}\n{'-'*20}")
+            print(f"\n[Attempt {attempt+1}/{max_retries}] Verifying Rego logic...")
+            print(f"[Current Rego Code]:\n{'-'*20}\n{current_rego}\n{'-'*20}")
             
             # Step 3: 运行测试 (Execution & Verification)
             failures, pass_count, total_count = await self._run_verification_tests(policy_id, current_rego, test_cases, opa_client)
             
-            print(f"📊 [Result] {pass_count}/{total_count} Passed.")
+            print(f"[Result] {pass_count}/{total_count} Passed.")
             
             if not failures:
                 print(f"✅ [Success] All tests passed on attempt {attempt+1}!")
@@ -474,9 +474,17 @@ result := {{
         file_path = await self._save_raw_file(policy_id, "employees.jsonl", content)
         return str(file_path)
 
-    async def update_db_schema(self, policy_id: str, content: str) -> str:
-        file_path = await self._save_raw_file(policy_id, "db_schema.sql", content)
+    async def update_db_schema(self, policy_id: str, content: Any) -> str:
+        # 1. 如果传进来的是列表 (List)，把它拼接成一个大字符串
+        if isinstance(content, list):
+            # 用两个换行符拼接，保证 SQL 语句之间有空行
+            content_str = "\n\n".join(content)
+        else:
+            # 如果已经是字符串，保持不变
+            content_str = str(content)
+        file_path = await self._save_raw_file(policy_id, "db_schema.sql", content_str)
         return str(file_path)
+ 
         
     async def update_rego_policy(self, policy_id: str, content: str) -> str:
         file_path = await self._save_raw_file(policy_id, "policy.rego", content)

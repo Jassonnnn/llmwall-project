@@ -155,9 +155,9 @@ class PermissionController:
         """
         
         # (可选) 动态从 PolicyManager 加载 schema 描述
-        schema_desc = await self._get_schema_description(policy_id)
-        if not schema_desc:
-             schema_desc = "employees表包含列：id, name, department, salary, position" # 备用硬编码
+        schema_prompt = await self._get_schema_description(policy_id)
+        if not schema_prompt:
+            schema_prompt = "CREATE TABLE employees (id varchar(100), name varchar(100), salary int, department varchar(50));"
 
         history_str = str(conversation_history) if conversation_history else "无"
 
@@ -169,6 +169,7 @@ class PermissionController:
 1.  **上下文理解**：优先分析`conversation_history`。如果当前查询是基于上一轮的结果进行筛选 (例如使用“他们中”)，你必须将上一轮`conditions`继承下来并与当前查询合并。
 2.  **重置上下文**：如果当前查询是一个全新的、与历史无关的请求，你必须忽略`conversation_history`。
 3.  **个人化查询**：当用户查询包含“我的”、“我自己的”等词语时，必须在`conditions`中添加`"id": "{user_id}"`的过滤条件。
+4.  **多表场景**：当问题涉及多个表（如员工表和部门表），`tables`必须列出所有相关表名，`columns`应携带必要的表前缀（如`employees.name`）。
 
 示例1 - 查询自己信息：
 用户查询："帮我查一下我的工资"
@@ -177,11 +178,15 @@ class PermissionController:
 示例2 - 查询所有员工：
 用户查询："查询所有员工的姓名和工资"
 输出：{{"tables": ["employees"], "columns": ["name", "salary"], "conditions": {{}}, "query_type": "select"}}
+
+示例3 - 查询跨表信息：
+用户查询："列出财务部员工及其所在城市"
+输出：{{"tables": ["employees", "departments"], "columns": ["employees.name", "departments.location"], "conditions": {{"departments.name": "财务部"}}, "query_type": "select"}}
 """
         
         user_prompt = f"""
 数据库表结构：
-- {schema_desc}
+{schema_prompt}
 
 用户查询："{natural_query}"
 用户ID：{user_id}
@@ -329,6 +334,7 @@ class PermissionController:
         except Exception as e:
             print(f"Warning: 读取 schema 文件失败 ({filepath}): {e}")
             return ""
+
 
     async def invalidate_cache(self, policy_id: str):
         """异步接口，供路由层失效指定租户缓存"""

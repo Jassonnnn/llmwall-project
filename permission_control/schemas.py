@@ -29,7 +29,7 @@ class CreatePolicyRequest(BaseModel):
     """
     tenant_id: str
     user_table: str  # 员工表 (jsonl) 的完整内容
-    db_schema: str   # 数据库描述文件 (sql) 的完整内容
+    db_schema: List[str]  # 数据库描述文件 (sql) 的完整内容
     nl_policy: str   # 自然语言规则 (txt) 的完整内容
 
 class UpdateFileType(str, Enum):

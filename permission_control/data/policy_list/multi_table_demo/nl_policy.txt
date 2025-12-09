@@ -1,0 +1,3 @@
+1. 老板 (boss) 可以查看任意员工在 A/B 表中的所有字段。
+2. 组长 (team_lead) 可以查询普通员工 (employee) 的工资字段 (monthly_salary)，但不能看到 annual_bonus。
+3. 普通员工 (employee) 只能查询自己的工资和年终奖信息。

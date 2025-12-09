@@ -38,8 +38,9 @@ async def create_policy(
         employee_path = await policy_manager.update_employee_table(request.policy_id, request.user_table)
         files_updated.append(employee_path)
 
-        # 2. 保存数据库 Schema
-        schema_path = await policy_manager.update_db_schema(request.policy_id, request.db_schema)
+        # 2. 保存数据库 Schema (支持多表定义)
+        schema_payload = "\n\n".join(request.db_schema)
+        schema_path = await policy_manager.update_db_schema(request.policy_id, schema_payload)
         files_updated.append(schema_path)
 
         # 3. 保存自然语言规则 (自动触发 Agentic Rego 生成)
