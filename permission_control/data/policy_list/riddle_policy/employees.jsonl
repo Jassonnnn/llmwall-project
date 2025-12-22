@@ -1,0 +1,3 @@
+{"user_id": "boss_001", "user_role": "boss", "attributes": {"team": "executive"}}
+{"user_id": "lead_001", "user_role": "team_lead", "attributes": {"team": "alpha"}}
+{"user_id": "staff_001", "user_role": "employee", "attributes": {"team": "alpha"}}

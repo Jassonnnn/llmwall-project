@@ -1,0 +1,4 @@
+权限策略如下：
+1. **老板 (boss)**: 拥有最高权限，可以查看 `employee_profiles` 和 `compensation` 表中的所有行和所有列。
+2. **组长 (team_lead)**: 在 `compensation` 表中，允许查看 `monthly_salary`，但**严格禁止**查看 `annual_bonus`。在 `employee_profiles` 表中可以查看所有信息。
+3. **普通员工 (employee)**: 只能查看 `compensation` 表中属于**自己** (user_id 与当前用户匹配) 的 `monthly_salary` 和 `annual_bonus`，以及自己的 `employee_profiles` 信息。

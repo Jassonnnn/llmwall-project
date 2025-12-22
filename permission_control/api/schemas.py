@@ -31,6 +31,7 @@ class CreatePolicyRequest(BaseModel):
     user_table: str  # 员工表 (jsonl) 的完整内容
     db_schema: List[str]   # 数据库描述文件 (sql) 的完整内容, 支持按表拆分提交
     nl_policy: str   # 自然语言规则 (txt) 的完整内容
+    use_agent: bool = False # 默认为 False (不跑自迭代)
 
     @validator("db_schema", pre=True)
     def _ensure_schema_list(cls, value):
@@ -59,6 +60,7 @@ class UpdatePolicyRequest(BaseModel):
     policy_id: str
     file_type: UpdateFileType # 必须是 "sql", "user_table", 或 "policy"
     content: str            # 要更新的文件内容
+    use_agent: bool = False # 默认为 False (不跑自迭代)
 
 class PolicyUpdateResponse(BaseModel):
     """

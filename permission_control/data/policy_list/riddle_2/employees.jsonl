@@ -1,6 +1,0 @@
-{"user_id": "chief_001", "user_role": "chief", "dept_id": 100, "access_level": 5, "jurisdiction_unit": "全市"}
-{"user_id": "sup_002", "user_role": "supervisor", "dept_id": 101, "access_level": 3, "jurisdiction_unit": "天河分局"}
-{"user_id": "ana_007", "user_role": "analyst", "dept_id": 102, "access_level": 2, "jurisdiction_unit": "越秀分局"}
-{"user_id": "off_003", "user_role": "officer", "dept_id": 101, "access_level": 1, "jurisdiction_unit": "天河分局"}
-{"user_id": "aud_005", "user_role": "auditor", "dept_id": 100, "access_level": 4, "jurisdiction_unit": "全市"}
-{"user_id": "eng_006", "user_role": "engineer", "dept_id": 101, "access_level": 3, "jurisdiction_unit": "天河分局"}

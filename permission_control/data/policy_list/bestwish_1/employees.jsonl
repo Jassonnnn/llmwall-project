@@ -1,0 +1,5 @@
+{"user_id":"1","user_role":"super_admin","attributes":{"department":null,"tenant":"1"}}
+{"user_id":"100","user_role":"common","attributes":{"department":["105"],"tenant":"1"}}
+{"user_id":"132","user_role":"common","attributes":{"department":["105"],"tenant":"1"}}
+{"user_id":"134","user_role":"super_admin","attributes":{"department":null,"tenant":"1"}}
+{"user_id":"136","user_role":"super_admin","attributes":{"department":null,"tenant":"1"}}

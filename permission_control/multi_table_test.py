@@ -3,8 +3,8 @@
 import json
 import requests
 
-API_BASE = "http://127.0.0.1:9999/api/v1"
-POLICY_ID = "multi_table_demo"
+API_BASE = "http://127.0.0.1:8888/api/v1"
+POLICY_ID = "riddle_policy"
 
 USER_TABLE = (
 	'{"user_id": "boss_001", "user_role": "boss", "attributes": {"team": "executive"}}\n'

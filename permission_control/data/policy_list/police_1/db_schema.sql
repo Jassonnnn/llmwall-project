@@ -1,4 +1,4 @@
-CREATE TABLE `bestwish_cloud`.`Untitled`  (
+CREATE TABLE `security_test_police`.`tb_case_info` (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '主键id',
   `alarm_number` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '警单编号',
   `alarm_time` datetime NULL DEFAULT NULL COMMENT '报警时间',
@@ -23,8 +23,8 @@ CREATE TABLE `bestwish_cloud`.`Untitled`  (
   `detailed_address` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '详细地址',
   `street_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '街道名称',
   `community_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '社区名称',
-  `area_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '区域名称',
-  `label_status` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT '0' COMMENT '标签状态：0-未达标 1-已达标 2-正在达标 3-达标失败',
+  `area_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '小区名称',
+  `label_status` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT '0' COMMENT '标签状态：0-未达标 1-已打标 2-正在打标 3-信息缺失',
   `data_status` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT '1' COMMENT '数据状态：0-系统数据 1-第三方数据',
   `deleted` bit(1) NULL DEFAULT b'0' COMMENT '删除标志（0代表存在 2代表删除）',
   `creator` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT '' COMMENT '创建者',
@@ -33,7 +33,6 @@ CREATE TABLE `bestwish_cloud`.`Untitled`  (
   `update_time` datetime NULL DEFAULT NULL COMMENT '更新时间',
   `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '备注',
   `user_id` bigint NULL DEFAULT NULL COMMENT '用户id',
-  `dept_id` bigint NULL DEFAULT NULL COMMENT '部门id，默认100，101为分局1，102为分局2，依次增加',
   `tenant_id` bigint NULL DEFAULT 1 COMMENT '租户id',
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1152 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE=InnoDB AUTO_INCREMENT=35974 CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;

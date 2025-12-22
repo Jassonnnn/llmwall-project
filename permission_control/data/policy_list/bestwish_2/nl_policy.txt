@@ -1,0 +1,1 @@
+超级管理者(super_admin) 可以查看所有知识库数据。普通角色(common) 只能查看指定部门的数据，具体参考department的值。

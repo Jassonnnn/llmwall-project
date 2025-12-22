@@ -48,7 +48,8 @@ async def create_policy(
         nl_path = await policy_manager.update_nl_policy(
             request.policy_id, 
             request.nl_policy,
-            opa_client=controller.opa_client 
+            opa_client=controller.opa_client,
+            use_agent=request.use_agent
         )
         # ---------------------------------------------
         
@@ -99,7 +100,8 @@ async def update_policy(
             file_path = await policy_manager.update_nl_policy(
                 request.policy_id, 
                 request.content,
-                opa_client=controller.opa_client
+                opa_client=controller.opa_client,
+                use_agent=request.use_agent
             )
             # --------------------------------
 

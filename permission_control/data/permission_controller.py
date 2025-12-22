@@ -168,18 +168,28 @@ class PermissionController:
 解析规则：
 1.  **上下文理解**：优先分析`conversation_history`。如果当前查询是基于上一轮的结果进行筛选 (例如使用“他们中”)，你必须将上一轮`conditions`继承下来并与当前查询合并。
 2.  **重置上下文**：如果当前查询是一个全新的、与历史无关的请求，你必须忽略`conversation_history`。
-3.  **个人化查询**：当用户查询包含“我的”、“我自己的”等词语时，必须在`conditions`中添加`"id": "{user_id}"`的过滤条件。
-4.  **多表场景**：当问题涉及多个表（如员工表和部门表），`tables`必须列出所有相关表名，`columns`应携带必要的表前缀（如`employees.name`）。
+3.  **个人化查询（严格触发机制）**：
+    - 只有当用户查询中**显式包含**“我的”、“我自己”、“本人”这三个具体的词时，才允许在`conditions`中添加`"id": "{user_id}"`。
+    - **禁止隐含关联**：如果用户查询的是“老板”、“经理”、“财务部”等抽象名词或角色，且**没有**搭配“我的”一词，视为查询全量数据或特定角色，**绝对禁止**添加当前`{user_id}`作为条件
+4.  **多表场景**：当问题涉及多个表（如员工表和部门表），`tables`必须列出所有相关表名。
+5.  **统一标识**：无论问题只涉及一个表还是单个表，，columns都应携带相应的表前缀（如`employees.name`）。
+6.  **严格的条件限制**:请严格按照用户的自然语言提取条件。`user_id` 仅作为上下文变量提供，除非触发规则3，否则**不得**将其作为默认过滤条件添加到 `conditions` 中。
+7.  **空缺处理**:用户的自然语言中如果没有包含任何关于列的约束，请默认将列约束当成查询所有列。
+8.  **操作处理**:对于用户自然语言的动作，请放在query_type中，例如"select","count"
 
 示例1 - 查询自己信息：
 用户查询："帮我查一下我的工资"
-输出：{{"tables": ["employees"], "columns": ["salary"], "conditions": {{"id": "{user_id}"}}, "query_type": "select"}}
+输出：{{"tables": ["employees"], "columns": ["employees.salary"], "conditions": {{"id": "{user_id}"}}, "query_type": "select"}}
 
 示例2 - 查询所有员工：
 用户查询："查询所有员工的姓名和工资"
-输出：{{"tables": ["employees"], "columns": ["name", "salary"], "conditions": {{}}, "query_type": "select"}}
+输出：{{"tables": ["employees"], "columns": ["employees.name", "employees.salary"], "conditions": {{}}, "query_type": "select"}}
 
-示例3 - 查询跨表信息：
+示例3 - 统计员工个数：
+用户查询："统计所有员工的个数"
+输出：{{"tables": ["employees"], "columns": ["*"], "conditions": {{}}, "query_type": "count"}}
+
+示例4 - 查询跨表信息：
 用户查询："列出财务部员工及其所在城市"
 输出：{{"tables": ["employees", "departments"], "columns": ["employees.name", "departments.location"], "conditions": {{"departments.name": "财务部"}}, "query_type": "select"}}
 """
@@ -196,7 +206,7 @@ class PermissionController:
 - tables: (list) 涉及的表名列表
 - columns: (list) 需要查询的列名列表  
 - conditions: (dict) 查询条件 (键值对格式)
-- query_type: (str) 查询类型 (例如: "select")
+- query_type: (str) 操作类型 (例如: "select","count")
 
 只返回JSON块，不要包含 "```json" 标记或任何其他解释：
 """
@@ -246,7 +256,7 @@ class PermissionController:
 允许查询的列：{allowed_columns}
 行级约束：{row_constraints}
 
-只返回重写后的自然语言查询，不要其他解释：
+只返回重写后的自然语言查询，不要其他解释
 """
         
         # (已修改) 使用用户指定的 litellm 调用参数
@@ -264,7 +274,10 @@ class PermissionController:
         
         rewritten = response.choices[0].message.content.strip()
         # 清理可能的引号
-        rewritten = rewritten.strip('"\'')
+        if "\n" in rewritten:
+            rewritten = rewritten.split("\n")[0]
+        # 清理可能的引号 (放在 split 之后，防止引号跨行)
+        rewritten = rewritten.strip('"\'').strip()
         return rewritten
 
     # --- 缓存和文件 I/O 辅助方法 ---

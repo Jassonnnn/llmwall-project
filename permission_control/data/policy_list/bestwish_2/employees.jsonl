@@ -1,0 +1,5 @@
+{"user_id":"1","user_role":"super_admin","attributes":{"department":["博思惟是","深圳总公司","长沙分公司","研发部门","市场部门","测试部门","财务部门","运维部门"],"tenant":"1"}}
+{"user_id":"100","user_role":"common","attributes":{"department":["研发部门","测试部门","运维部门"],"tenant":"1"}}
+{"user_id":"132","user_role":"common","attributes":{"department":["研发部门","测试部门","运维部门"],"tenant":"1"}}
+{"user_id":"134","user_role":"super_admin","attributes":{"department":["博思惟是","深圳总公司","长沙分公司","研发部门","市场部门","测试部门","财务部门","运维部门"],"tenant":"1"}}
+{"user_id":"136","user_role":"super_admin","attributes":{"department":["博思惟是","深圳总公司","长沙分公司","研发部门","市场部门","测试部门","财务部门","运维部门"],"tenant":"1"}}

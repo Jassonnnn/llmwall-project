@@ -29,7 +29,7 @@ all_db_columns := {
 roles := {
     "boss": {
         "description": "Boss can view everything.",
-        "allowed_columns": ["*"], 
+        "allowed_columns": ["*"],
         "row_filter_type": "no_restriction",
         "excluded_columns": []
     },
@@ -40,7 +40,7 @@ roles := {
             "employee_profiles.user_id",
             "employee_profiles.name",
             "employee_profiles.title",
-            "compensation.user_id", 
+            "compensation.user_id",
             "compensation.monthly_salary"
         ],
         "row_filter_type": "team_scope_employees",
@@ -50,10 +50,10 @@ roles := {
     "employee": {
         "description": "Employees see only their own data.",
         "allowed_columns": [
-            "employee_profiles.user_id", 
+            "employee_profiles.user_id",
             "employee_profiles.name",
             "employee_profiles.title",
-            "compensation.monthly_salary", 
+            "compensation.monthly_salary",
             "compensation.annual_bonus"
         ],
         "row_filter_type": "self_only",
@@ -103,7 +103,6 @@ allowed_columns := sort([c | final_allowed_set[c]])
 # -----------------------------------------------------------------------------
 # 4. 行级权限逻辑
 # -----------------------------------------------------------------------------
-
 row_constraints := {} if {
     role_config.row_filter_type == "no_restriction"
 }
@@ -114,7 +113,7 @@ row_constraints := {"user_id": user_id} if {
 
 row_constraints := {
     "team": user_team,
-    "target_role": "employee" 
+    "target_role": "employee"
 } if {
     role_config.row_filter_type == "team_scope_employees"
 }
@@ -122,7 +121,6 @@ row_constraints := {
 # -----------------------------------------------------------------------------
 # 5. 最终裁决
 # -----------------------------------------------------------------------------
-
 allow if {
     role_config
     count(allowed_columns) > 0
