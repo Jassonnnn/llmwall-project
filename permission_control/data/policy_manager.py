@@ -351,165 +351,421 @@ class PolicyManager:
 ---
 ### 核心指令
 
-你的回答**必须**从 `package {policy_id}.access` 这一行开始，并包含一个完整的 Rego 策略。
-你**必须**严格遵循下面的代码结构模板。
-**严禁修改**模板中“列访问逻辑”部分的结构（即 `Step A` 到 `Step E` 的流程），因为这涉及复杂的集合运算逻辑。
-你只需要根据用户的 NL 规则填充 `all_db_columns`、`roles` 和 `row_constraints` 部分。
+1.  **结构保持 (Critical)**：
+    *   必须严格复制下方的 Rego 代码模板。
+    *   **严禁修改** Section 3 (增强型时间引擎) 和 Section 4 (列逻辑) 以及Section 5.2 5.3 5.4 5.5 5.6（固定行处理逻辑）。
+    *   你只需要填充 Section 1, Section 2, 和 Section 5.1。
 
+2.  **AST 架构 (Strict Mode)**：
+    *   在编写 Section 5.1 (`policy_scope`) 时，所有字段的约束值必须是 **操作符对象列表** (List of Objects)，即使只有一个条件。
+    *   **错误写法**: `"dept": {{"op": "=", "val": "Sales"}}`
+    *   **正确写法**: `"dept": [ {{"op": "=", "val": "Sales"}} ]`
+    *   这是为了完美适配 `BETWEEN` 逻辑（可能包含两个条件）和多重过滤场景。
+
+3.  **时间处理 (Token Aware)**：
+    *   模板的 Section 3 已经内置了对标准时间 Token 的支持（如 `{{{{CURRENT_MONTH_START}}}}`, `{{{{AGO_HOUR_24}}}}` 等）。
+    *   **不要**在 Rego 中手动编写复杂的日期计算逻辑。
+    *   在 `policy_scope` 中，如果需要动态时间，请直接构造包含 Token 的字符串，引擎会自动解析。例如：`"val": "{{{{AGO_DAY_30}}}}"`。
+
+4.  **逻辑核心：约束继承与分层解析 (Constraint Inheritance) [重点]**：
+    *   **Layer 1: 识别全局边界 (Global Boundary)**
+        *   分析 NL 规则的首句或通用描述。如果提到“基于 X 隔离”、“所有人只能访问归属于 X 的数据”，这属于**全局硬性约束**。
+        *   **操作**：全局约束字段（如 `tenant_id`, `project_id`, `app_id` 等）必须**强制注入**到所有角色的 `policy_scope` 中。
+    *   **Layer 2: 相对的“全部权限” (Relative "All")**
+        *   **陷阱预警**：当规则描述高权限角色（如 Admin）可以查看“所有数据”时，通常是指“**当前全局边界内**的所有数据”。
+        *   **禁止操作**：严禁将 Admin 的 scope 设为空对象 `{{}}`（这代表全库扫描），除非规则明确使用了“跨域 (Cross-domain)”、“全局透视”等突破性词汇。
+        *   **正确逻辑**：`Admin_Scope = 全局边界字段 + {{}}`。
+
+5.  **你需要填充的部分**：
+    *   `all_db_columns`: 根据 Schema 填入所有 "Table.Column"。
+    *   `roles`: 根据 NL 规则定义 `allowed_columns` 和 `row_filter_rule` 名称。
+    *   `[Step 5.1]`: 编写具体的 if 逻辑，确保**每个分支**都正确继承了全局约束。
+    
 ---
 ### 上下文信息
 1. **数据库 Schema**: 
 {schema}
 
-2. **用户属性示例**: 
+2. **用户属性示例 (User Sample)**: 
 {user_sample}
 
-3. **租户 ID**: {policy_id}
+3. **策略 ID (Package Name)**: {policy_id}
 
 ---
-### 最终 Rego 代码结构 (必须严格复制并填充)
+### 最终 Rego 代码结构 (请逐字复制并填充标记部分)
 
 ```rego
 package {policy_id}.access
 
 import rego.v1
 
-# 1. 默认设置
-default allow := false
+# =============================================================================
+# 1. 默认设置 & 数据库全集
+# =============================================================================
+default allow := false 
 default allowed_columns := []
 default row_constraints := {{"deny": true}}
-default reason := "Access denied by default. No rules matched."
+default reason := "Access denied by default."
 default role_config := {{}}
 
-# --- 关键：从 Schema 中提取所有列名，填入这里 ---
-# 这是通配符 (*) 展开的基础
+# [需填充] 数据库全集
 all_db_columns := {{
-    # 请根据 SQL Schema 填入所有列名
-    # 建议格式为 "table_name.column_name"，同时注意表名和列名对应
+    # 示例: "orders.id", "orders.amount"
+    # 请根据 Schema 完整填充
 }}
 
-# 2. 角色定义 (请根据 NL 规则填充这里)
-# 注意：key 必须是小写 (例如 "manager")，与 user_role 匹配
+# 2. 角色定义 (请根据 NL 规则填充这里,**注意**核心指令4)
 roles := {{
-    # 示例模板:
+    # 示例:
     # "manager": {{
-    #     "description": "Full access manager",
+    #     "description": "Department Manager",
     #     "allowed_columns": ["*"], 
-    #     "row_filter": "all",
-    #     "excluded_columns": [] 
-    # }},
-    # "employee": {{
-    #     "description": "Standard employee",
-    #     "allowed_columns": ["id", "name"],
-    #     "row_filter": "self_only",
-    #     "excluded_columns": ["salary"]
+    #     "row_filter_rule": "dept_scope",
+    #     "excluded_columns": ["employees.salary"] 
     # }}
-    # [重要提示]
-    # 如果规则涉及特定范围过滤（如“只能看本部门”、“只能看分公司”），
-    # 请自定义 row_filter 名称，例如 "dept_match", "region_scope" 等。
 }}
 
-# 3. 全局辅助变量(请根据{user_sample}中的attributes添加新的全局辅助变量)
+# 3. 全局辅助变量 & 增强型时间引擎 (Enhanced Time Engine) [严禁修改且最终保留]
+# =============================================================================
 user_role := input.user.user_role
-user_id := input.user.user_id
-
-
-# 安全获取配置，如果角色不存在返回空对象
+user_attrs := object.get(input.user, "attributes", input.user)
 role_config := object.get(roles, user_role, {{}})
 
-# 3b. 有效过滤器注册 (请将你用到的 row_filter 名字加进去)
-valid_row_filters := {{
-    "all", "self_only"
-    # ... 根据需要添加其他 filter ...
+# --- [Core] 基础时间计算 (时区: Asia/Shanghai) ---
+ns_now := time.now_ns()
+fmt_full(ns) := time.format([ns, "Asia/Shanghai", "2006-01-02 15:04:05"])
+fmt_date(ns) := time.format([ns, "Asia/Shanghai", "2006-01-02"])
+
+# --- [A] 基础锚点 (Base Anchors) ---
+str_now := fmt_full(ns_now)
+str_today := fmt_date(ns_now)
+str_yesterday := fmt_date(time.add_date(ns_now, 0, 0, -1))
+str_tomorrow := fmt_date(time.add_date(ns_now, 0, 0, 1))
+
+# --- [B.1] 月份锚点 (Month Windows) ---
+date_vec := time.date(ns_now) # [year, month, day]
+curr_year := date_vec[0]
+curr_month := date_vec[1]
+
+# 本月 (Current Month)
+str_curr_month_start := sprintf("%d-%02d-01", [curr_year, curr_month])
+# 计算本月最后一天: 下个月1号 减去 1天 (24小时)
+ns_next_month_1st := time.parse_ns("2006-01-02", sprintf("%d-%02d-01", [
+    time.date(time.add_date(ns_now, 0, 1, 0))[0], 
+    time.date(time.add_date(ns_now, 0, 1, 0))[1]
+]))
+str_curr_month_end := fmt_date(time.add_date(ns_next_month_1st, 0, 0, -1))
+
+# 上个月 (Last Month)
+ns_last_month := time.add_date(ns_now, 0, -1, 0)
+str_last_month_start := sprintf("%d-%02d-01", [time.date(ns_last_month)[0], time.date(ns_last_month)[1]])
+# 上个月最后一天: 本月1号 减去 1天
+ns_curr_month_1st_parsed := time.parse_ns("2006-01-02", str_curr_month_start)
+str_last_month_end := fmt_date(time.add_date(ns_curr_month_1st_parsed, 0, 0, -1))
+
+# --- [B.2] 年份锚点 (Year Windows) ---
+# 今年
+str_curr_year_start := sprintf("%d-01-01", [curr_year])
+str_curr_year_end := sprintf("%d-12-31", [curr_year])
+
+# 去年
+str_last_year_start := sprintf("%d-01-01", [curr_year - 1])
+str_last_year_end := sprintf("%d-12-31", [curr_year - 1])
+
+# --- [B.3] 去年同月 (Last Year Same Month) ---
+# 起始: 去年 + 当前月 + 01
+str_lysm_start := sprintf("%d-%02d-01", [curr_year - 1, curr_month])
+# 结束: 先找到“去年同月”的下个月1号，再减1天
+# 逻辑: (当前时间 - 1年 + 1月) 的1号 - 1天
+ns_lysm_next_month := time.add_date(ns_now, -1, 1, 0)
+str_lysm_next_month_1st := sprintf("%d-%02d-01", [time.date(ns_lysm_next_month)[0], time.date(ns_lysm_next_month)[1]])
+str_lysm_end := fmt_date(time.add_date(time.parse_ns("2006-01-02", str_lysm_next_month_1st), 0, 0, -1))
+
+
+# --- 解析逻辑 Step 1: 静态 Token 替换 ---
+resolve_step_1(val) := v1 if {{
+    is_string(val)
+    # 1. Base Anchors
+    s0 := replace(replace(replace(val, "{{{{NOW}}}}", str_now), "{{{{TODAY}}}}", str_today), "{{{{YESTERDAY}}}}", str_yesterday)
+    s1 := replace(s0, "{{{{TOMORROW}}}}", str_tomorrow)
+    
+    # 2. Month Windows
+    s2 := replace(replace(s1, "{{{{CURRENT_MONTH_START}}}}", str_curr_month_start), "{{{{CURRENT_MONTH_END}}}}", str_curr_month_end)
+    s3 := replace(replace(s2, "{{{{LAST_MONTH_START}}}}", str_last_month_start), "{{{{LAST_MONTH_END}}}}", str_last_month_end)
+    
+    # 3. Year Windows (新增)
+    s4 := replace(replace(s3, "{{{{CURRENT_YEAR_START}}}}", str_curr_year_start), "{{{{CURRENT_YEAR_END}}}}", str_curr_year_end)
+    s5 := replace(replace(s4, "{{{{LAST_YEAR_START}}}}", str_last_year_start), "{{{{LAST_YEAR_END}}}}", str_last_year_end)
+    
+    # 4. Last Year Same Month (新增)
+    v1 := replace(replace(s5, "{{{{LAST_YEAR_SAME_MONTH_START}}}}", str_lysm_start), "{{{{LAST_YEAR_SAME_MONTH_END}}}}", str_lysm_end)
+}} else := val
+
+# --- 解析逻辑 Step 2: 动态解析 (startswith) ---
+resolve_step_2(val) := final_val if {{
+    is_string(val)
+    startswith(val, "{{{{AGO_DAY_")
+    # 截取数字: "{{{{AGO_DAY_" 长度为 10
+    num_str := trim(substring(val, 10, -1), "}}}}")
+    offset := to_number(num_str)
+    final_val := fmt_date(time.add_date(ns_now, 0, 0, 0 - offset))
+}} else := final_val if {{
+    is_string(val)
+    startswith(val, "{{{{AGO_MONTH_")
+    # "{{{{AGO_MONTH_" 长度为 12
+    num_str := trim(substring(val, 12, -1), "}}}}")
+    offset := to_number(num_str)
+    final_val := fmt_date(time.add_date(ns_now, 0, 0 - offset, 0))
+}} else := val
+
+# --- 主解析函数 (分层处理避免递归错误) ---
+
+# 内部函数：只负责处理单值
+_resolve_single_item(val) := result if {{
+    v1 := resolve_step_1(val)
+    result := resolve_step_2(v1)
+}} else := val
+
+# 公共接口：负责分发 (数组 vs 单值)
+resolve_value(val) := result if {{
+    is_array(val)
+    result := [res | some item in val; res := _resolve_single_item(item)]
+}} else := result if {{
+    result := _resolve_single_item(val)
 }}
 
 # -----------------------------------------------------------------------------
-# 4. 列访问逻辑 (严禁修改结构 - Pipeline 模式)
+# 4. 列访问逻辑 (Pipeline 模式) [严禁修改且最终保留]
 # -----------------------------------------------------------------------------
-
-# [Step A] 计算基准列集 (Base Set)
-# 如果配置包含 "*"，则展开为 all_db_columns，否则使用配置列表
 base_columns_set := cols if {{
     "*" in role_config.allowed_columns
     cols := all_db_columns
 }} else := cols if {{
-    role_config.allowed_columns # 确保字段存在
+    role_config.allowed_columns
     not "*" in role_config.allowed_columns
     cols := {{col | col := role_config.allowed_columns[_]}}
 }} else := {{}}
 
-# [Step B] 提取黑名单
 blacklisted := {{c | c := object.get(role_config, "excluded_columns", [])[_]}}
-
-# [Step C] 计算基准有效集 (Base - Blacklist)
 base_valid_set := base_columns_set - blacklisted
-
-# [Step D] 处理请求的列 (Requested Set)
 requested_cols_raw := object.get(input.query_request, "columns", [])
 requested_is_wildcard if {{ "*" in requested_cols_raw }}
 
 requested_set := cols if {{
     requested_is_wildcard
-    # 如果请求 select *，则返回所有该角色允许的列
     cols := base_valid_set
 }} else := cols if {{
     not requested_is_wildcard
     cols := {{c | c := requested_cols_raw[_]}}
 }}
 
-# [Step E] 最终允许集合 = (Base - Blacklist) AND Requested
-# 只有既在白名单、又不在黑名单、且被请求的列才会被返回
 final_allowed_set := base_valid_set & requested_set
-
-# [Step F] 格式化输出
 allowed_columns := sort([c | final_allowed_set[c]])
 
-# -----------------------------------------------------------------------------
-# 5. 行访问逻辑 (请根据 NL 规则编写具体实现)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 5. 行访问逻辑 (Strict AST 模式)
+# =============================================================================
 
-# 场景 1: 无限制
-row_constraints := {{}} if {{ role_config.row_filter == "all" }}
+# [Step 5.1 - 需填充] 定义策略强制范围 (Policy Scope)
+# 任务：返回 AST 对象列表的 Map: {{ "key": [{{...}}, {{...}}] }}
+# 逻辑注意：Scope 最终是 "全局约束 (Layer 1)" 与 "角色约束 (Layer 2)" 的交集
+# 值注意：在对用户的属性内容进行限制时，**一定要参照User Sample**中的内容，**避免**所约束的内容在用户属性中**名称不匹配**
+policy_scope := scope if {{
+    role_config.row_filter_rule == "all"  # 仅当明确允许跨域时使用
+    scope := {{}}
+}} else := scope if {{
+    # [通用示例 A] 全局隔离 + 角色全权 (如: 项目经理看本项目所有数据)
+    # NL: "按项目(project_id)隔离。经理可以看所有。" -> 意味着看本项目的 "所有"
+    # role_config.row_filter_rule == "manager_scope"
+    # scope := {{
+    #     "table.project_id": [ {{ "op": "=", "val": user_attrs.project_name }} ]
+    # }}
+    
+    # [通用示例 B] 全局隔离 + 角色细分 (如: 员工只能看本项目中指派给自己的)
+    # role_config.row_filter_rule == "employee_scope"
+    # scope := {{
+    #     # Layer 1: Global
+    #     "table.project_id": [ {{ "op": "=", "val": user_attrs.project_name }} ],
+    #     # Layer 2: Specific
+    #     "table.assignee":   [ {{ "op": "=", "val": user_attrs.uid }} ]
+    # }}
+    
+}} else := {{ "deny": true}}
 
-# 场景 2: 仅自己
-row_constraints := {{"id": user_id}} if {{ role_config.row_filter == "self_only" }}
-
-# 场景 3（重要提示）: 组织/范围匹配 (Scope Match) 
-# 请根据 NL 规则，找到 {user_sample} 中的Attributes 和 {schema} 之间的对应关系。
-# 逻辑: "用户属性中的 X 必须等于 数据库列中的 Y"
-#
-# 模板范式 (请模仿此结构，不要硬编码具体字段):
-# row_constraints := {{
-#     "schema_column_name": user_attrs.attribute_key,  # 例如: "dept_id": user_attrs.department_id
-#     "optional_filter": "value"                       # 例如: "target_role": "subordinate"
-# }} if {{
-#     role_config.row_filter == "YOUR_CUSTOM_FILTER_NAME" # 例如 "dept_scope"
-# }}
-
-
-# 兜底: 拒绝无效或未定义的 row_filter
-row_constraints := {{"deny": true}} if {{
-    count(role_config) > 0
-    filter := object.get(role_config, "row_filter", "")
-    not filter in valid_row_filters
+# [Step 5.2] 提取请求并解析时间 Token [严禁修改且最终保留]
+raw_conditions := object.get(input.query_request, "conditions", {{}})
+requested_conditions := clean_conds if {{
+    clean_conds := {{k: v_list |
+        some k, raw_list in raw_conditions
+        v_list := [resolved_item |
+            some item in raw_list
+            resolved_item := {{
+                "op": item.op,
+                "val": resolve_value(item.val)
+            }}
+        ]
+    }}
 }}
 
+# [Step 5.3] 智能合规性检查 [严禁修改且最终保留]
+
+to_list(x) := x if {{ is_array(x) }} else := [] if {{ x == null }} else := [x]
+
+trim_percent(s) := trim(s, "%")
+
+is_compliant(req, pol) if {{
+    req.op == pol.op
+    req.val == pol.val
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "="
+    req.op == "IN"
+    is_array(req.val)
+    some item in req.val
+    item == pol.val
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "IN"
+    req.op == "IN"
+    # 集合求交集: 存在 x 同时属于 req 和 pol
+    some x in req.val
+    x in pol.val
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "IN"
+    req.op == "="
+    req.val in pol.val
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "="
+    req.op == "LIKE"
+    user_core := trim_percent(req.val)
+    # 双向包含检查
+    contains(pol.val, user_core)
+}}
+is_compliant(req, pol) if {{
+    pol.op == "="
+    req.op == "LIKE"
+    user_core := trim_percent(req.val)
+    contains(user_core, pol.val)
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "="
+    req.op == "BETWEEN"
+    is_array(req.val); count(req.val) == 2
+    pol.val >= req.val[0]
+    pol.val <= req.val[1]
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "BETWEEN"
+    req.op == "BETWEEN"
+    req.val[0] <= pol.val[1]
+    req.val[1] >= pol.val[0]
+}}
+
+is_compliant(req, pol) if {{
+    pol.op == "BETWEEN"
+    req.op == "="
+    req.val >= pol.val[0]
+    req.val <= pol.val[1]
+}}
+
+# [Step 5.4] 核心算法：求交集与清洗 (Intersection & Merge) [严禁修改且最终保留]
+_merge_item(req_item, pol_item) := result if {{
+    # 1. 策略是强限制 (=) -> 始终覆盖，确保安全
+    pol_item.op == "="
+    result := pol_item
+}} else := result if {{
+    # 2. 双方都是 IN -> 计算交集
+    pol_item.op == "IN"; req_item.op == "IN"
+    intersection := [x | x := req_item.val[_]; x in pol_item.val]
+    result := {{ "op": "IN", "val": intersection }}
+}} else := result if {{
+    # 3. 策略是范围(BETWEEN)，用户是范围(BETWEEN) -> 计算区间重叠
+    pol_item.op == "BETWEEN"; req_item.op == "BETWEEN"
+    new_start := max([req_item.val[0], pol_item.val[0]])
+    new_end := min([req_item.val[1], pol_item.val[1]])
+    result := {{ "op": "BETWEEN", "val": [new_start, new_end] }}
+}} else := req_item # 默认：策略较宽泛时，保留用户更精细的查询条件
+
+_calculate_constraint(req_list, pol_list) := result if {{
+    # Case A: 仅策略有 -> 注入策略
+    count(pol_list) > 0; count(req_list) == 0
+    result := pol_list
+}} else := result if {{
+    # Case B: 仅用户有 -> 放行用户
+    count(pol_list) == 0; count(req_list) > 0
+    result := req_list
+}} else := result if {{
+    # Case C: 双方都有 -> 清洗求交集
+    count(pol_list) > 0; count(req_list) > 0
+    
+    result := [ final_item | 
+        some r in req_list
+        some p in pol_list
+        
+        # 1. 必须合规
+        is_compliant(r, p)
+        
+        # 2. 计算交集结果 (使用高级 Merge)
+        final_item := _merge_item(r, p)
+    ]
+}} else := []
+
+# 主规则：生成清洗后的约束 Map
+filtered_constraints[key] := final_list if {{
+    some key in object.keys(requested_conditions) | object.keys(policy_scope)
+    req_list := to_list(object.get(requested_conditions, key, null))
+    pol_list := to_list(object.get(policy_scope, key, null))
+    final_list := _calculate_constraint(req_list, pol_list)
+}}
+
+# [Step 5.5] 拒绝判定 (Denial Logic) [严禁修改且最终保留]
+denial_reasons contains msg if {{
+    some key, _ in policy_scope
+    
+    cleaned := object.get(filtered_constraints, key, [])
+    original := object.get(requested_conditions, key, [])
+    
+    # 触发条件: 用户请求了该字段，但清洗后结果为空 (说明完全不合规)
+    count(original) > 0
+    count(cleaned) == 0
+    
+    msg := sprintf("Access Denied: Requested values for '%s' are out of permitted scope.", [key])
+}}
+
+row_constraints := res if {{
+    count(denial_reasons) == 0
+    res := filtered_constraints
+}} else := res if {{
+    count(denial_reasons) > 0
+    res := {{
+        "deny": true, 
+        "reason": concat("; ", denial_reasons)
+    }}
+}} else := {{"deny": true, "reason": "Internal Policy Error"}}
+
 # -----------------------------------------------------------------------------
-# 6. 最终裁决
+# 6. 最终裁决 [严禁修改且最终保留]
 # -----------------------------------------------------------------------------
 allow if {{
-    count(role_config) > 0        # 角色存在
-    count(allowed_columns) > 0    # 至少有一列权限
-    not row_constraints.deny      # 行权限未被拒绝
+    count(role_config) > 0
+    count(allowed_columns) > 0
+    not row_constraints.deny
 }}
 
-# 7. 决策理由
 reason := sprintf("Access Granted for role: %s", [user_role]) if {{ allow }}
 else := "Access Denied: Role undefined." if {{ count(role_config) == 0 }}
 else := "Access Denied: No valid columns requested or allowed." if {{ not allow; count(allowed_columns) == 0 }}
-else := "Access Denied: Row constraint restriction." if {{ not allow; row_constraints.deny }}
+else := object.get(row_constraints, "reason", "Access Denied: Row constraints.") if {{ not allow; row_constraints.deny }}
+else := "Access Denied: Unknown reason."
 
-# 8. 输出结果
 result := {{
     "allowed": allow,
     "allowed_columns": allowed_columns,

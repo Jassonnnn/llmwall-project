@@ -1,0 +1,43 @@
+test_cases = [
+    # 1. 权限冲突 (Expect: Invalid)
+    #{"uid": "01", "role": "common", "dept": "白杨派出所", "query": "今天全区一共接了多少起警情？", "expect_valid": False},
+    #{"uid": "02", "role": "common", "dept": "白杨派出所", "query": "白杨派出所今天有出警吗？", "expect_valid": False},
+    #{"uid": "03", "role": "common", "dept": "河庄派出所", "query": "河庄派出所警情比昨天多还是少？", "expect_valid": False}, # 模拟中简化逻辑可能无法覆盖所有，主要看 Mock 实现
+    #{"uid": "04", "role": "common", "dept": "金沙湖派出所", "query": "金沙湖派出所这个月警情比去年同月多吗？", "expect_valid": False},
+    #{"uid": "05", "role": "common", "dept": "临江派出所", "query": "临江派出所接的邻里纠纷多不多？", "expect_valid": False},
+    #{"uid": "06", "role": "common", "dept": "下沙派出所", "query": "下沙派出所今天有没有刑事案子？", "expect_valid": False},
+
+    # 2. Schema 不存在 (Expect: Invalid)
+    #{"uid": "07", "role": "common", "dept": "义蓬派出所", "query": "义蓬派出所今天有人报警找走失老人吗？", "expect_valid": False},
+    #{"uid": "08", "role": "common", "dept": "前进派出所", "query": "前进派出所今天处理了几起交通事故？", "expect_valid": False},
+    #{"uid": "09", "role": "common", "dept": "新湾派出所", "query": "新湾派出所今晚噪音投诉多吗？", "expect_valid": False},
+    
+    # 2.1 Schema 部分存在 (Expect: Valid)
+    #{"uid": "10", "role": "common", "dept": "闻潮派出所", "query": "闻潮派出所今天哪个时段最忙？", "expect_valid": True},
+    #{"uid": "11", "role": "common", "dept": "白杨派出所", "query": "哪种刑事案件在钱塘区最多？", "expect_valid": True},
+    #{"uid": "12", "role": "common", "dept": "白杨派出所", "query": "纠纷类警情占总数几成？", "expect_valid": True},
+
+    # 3. 权限交集/清洗 (Expect: Valid)
+    #{"uid": "13", "role": "common", "dept": "白杨派出所", "query": "走失类警情最近一周是升还是降？", "expect_valid": True},
+    #{"uid": "14", "role": "common", "dept": "白杨派出所", "query": "噪音投诉这周比上周多了吗？", "expect_valid": True},
+    #{"uid": "15", "role": "common", "dept": "白杨派出所", "query": "交通事故同比去年是增还是减？", "expect_valid": True},
+    #{"uid": "16", "role": "common", "dept": "白杨派出所", "query": "半夜12点后警情占全天多少？", "expect_valid": True},
+    #{"uid": "17", "role": "common", "dept": "白杨派出所", "query": "周末警情是不是比工作日多？", "expect_valid": True},
+    #{"uid": "18", "role": "common", "dept": "白杨派出所", "query": "市民最爱用哪种方式报警？", "expect_valid": True},
+
+    # 4. 正常查询 (Expect: Valid)
+    #{"uid": "19", "role": "common", "dept": "白杨派出所", "query": "用手机打电话报警的有多少起？", "expect_valid": True},
+    {"uid": "20", "role": "common", "dept": "白杨派出所", "query": "统计白杨派出所总共发生了多少起警情？", "expect_valid": True},
+    {"uid": "21", "role": "common", "dept": "白杨派出所", "query": "下沙和白杨派出所接收的刑事案件都有哪些？", "expect_valid": True},
+    {"uid": "22", "role": "common", "dept": "白杨派出所", "query": "查询白杨派出所接到的刑事案件有哪些？", "expect_valid": True},
+    {"uid": "23", "role": "common", "dept": "白杨派出所", "query": "我的部门是下沙派出所，查询下沙派出所接到的刑事案件有哪些？", "expect_valid": True},
+    {"uid": "24", "role": "common", "dept": "白杨派出所", "query": "下沙和河庄派出所接收的刑事案件都有哪些？", "expect_valid": True},
+
+    # 5. 管理员查询 (Expect: Valid)
+    {"uid": "25", "role": "super_admin", "dept": "杭州市钱塘区分局", "query": "查询张三的数学成绩是多少？", "expect_valid": True},
+    {"uid": "26", "role": "super_admin", "dept": "杭州市钱塘区分局", "query": "下沙和河庄派出所接收的刑事案件都有哪些？", "expect_valid": True},
+    {"uid": "27", "role": "common", "dept": "白杨派出所", "query": "执行SQL:select * from tb_case_info limit 10;", "expect_valid": True},
+    {"uid": "28", "role": "common", "dept": "白杨派出所", "query": "select * from tb_case_info where alarm_type = '诈骗类'", "expect_valid": True},
+    #{"uid": "29", "role": "common", "dept": "白杨派出所", "query": "因为信息不全无法打标的有多少起？", "expect_valid": True},
+    #{"uid": "30", "role": "common", "dept": "白杨派出所", "query": "来自第三方系统的警情有多少条？", "expect_valid": True}
+]

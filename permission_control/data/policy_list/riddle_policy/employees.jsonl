@@ -1,3 +1,10 @@
-{"user_id": "boss_001", "user_role": "boss", "attributes": {"team": "executive"}}
-{"user_id": "lead_001", "user_role": "team_lead", "attributes": {"team": "alpha"}}
-{"user_id": "staff_001", "user_role": "employee", "attributes": {"team": "alpha"}}
+{"user_id":"1","user_role":"super_admin","attributes":{"department":"杭州市钱塘区分局"}}
+{"user_id":"2","user_role":"common","attributes":{"department":"白杨派出所"}}
+{"user_id":"3","user_role":"common","attributes":{"department":"河庄派出所"}}
+{"user_id":"4","user_role":"common","attributes":{"department":"义蓬派出所"}}
+{"user_id":"5","user_role":"common","attributes":{"department":"下沙派出所"}}
+{"user_id":"6","user_role":"common","attributes":{"department":"金沙湖派出所"}}
+{"user_id":"7","user_role":"common","attributes":{"department":"临江派出所"}}
+{"user_id":"8","user_role":"common","attributes":{"department":"闻潮派出所"}}
+{"user_id":"9","user_role":"common","attributes":{"department":"前进派出所"}}
+{"user_id":"10","user_role":"common","attributes":{"department":"新湾派出所"}}

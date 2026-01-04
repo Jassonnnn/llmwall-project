@@ -61,7 +61,7 @@ class PermissionController:
         # 2. 将自然语言解析为 SQL-like JSON (使用 V1 demo 的提示词)
         try:
             parsed_query_request = await self._parse_query_to_json(
-                query, user_id, conversation_history, policy_id # (修改) 传入 policy_id
+                query, user_info, conversation_history, policy_id # (修改) 传入 policy_id
             )
             print(f"[check_query] LLM 解析结果: {parsed_query_request}")
         except Exception as e:
@@ -133,7 +133,8 @@ class PermissionController:
             rewritten_query = await self._rewrite_query_with_llm(
                 original_query=query,
                 allowed_columns=allowed_columns,
-                row_constraints=row_constraints
+                row_constraints=row_constraints,
+                policy_id=policy_id
             )
             print(f"[check_query] LLM 重写结果: {rewritten_query}")
             return {
@@ -147,7 +148,7 @@ class PermissionController:
 
     # --- LLM 辅助方法 ---
 
-    async def _parse_query_to_json(self, natural_query: str, user_id: str, conversation_history: List[Dict], policy_id: str) -> Dict[str, Any]:
+    async def _parse_query_to_json(self, natural_query: str, user_info: str, conversation_history: List[Dict], policy_id: str) -> Dict[str, Any]:
         """
         (新) 使用 LLM 将自然语言解析为 SQL-like JSON
         (基于用户提供的 llm_parser.py)
@@ -162,36 +163,148 @@ class PermissionController:
         history_str = str(conversation_history) if conversation_history else "无"
 
         # (已修改) 拆分 system_prompt 和 user_prompt
-        system_prompt = f"""
-你是一个专业的SQL查询解析专家，擅长理解自然语言和对话上下文，并将其转换为结构化的JSON查询。
+        system_prompt = """
+你是一个专业的SQL查询解析专家，擅长理解自然语言、对话上下文，并将其转换为符合 AST（抽象语法树）标准的结构化 JSON 对象。
 
-解析规则：
-1.  **上下文理解**：优先分析`conversation_history`。如果当前查询是基于上一轮的结果进行筛选 (例如使用“他们中”)，你必须将上一轮`conditions`继承下来并与当前查询合并。
-2.  **重置上下文**：如果当前查询是一个全新的、与历史无关的请求，你必须忽略`conversation_history`。
-3.  **个人化查询（严格触发机制）**：
-    - 只有当用户查询中**显式包含**“我的”、“我自己”、“本人”这三个具体的词时，才允许在`conditions`中添加`"id": "{user_id}"`。
-    - **禁止隐含关联**：如果用户查询的是“老板”、“经理”、“财务部”等抽象名词或角色，且**没有**搭配“我的”一词，视为查询全量数据或特定角色，**绝对禁止**添加当前`{user_id}`作为条件
-4.  **多表场景**：当问题涉及多个表（如员工表和部门表），`tables`必须列出所有相关表名。
-5.  **统一标识**：无论问题只涉及一个表还是单个表，，columns都应携带相应的表前缀（如`employees.name`）。
-6.  **严格的条件限制**:请严格按照用户的自然语言提取条件。`user_id` 仅作为上下文变量提供，除非触发规则3，否则**不得**将其作为默认过滤条件添加到 `conditions` 中。
-7.  **空缺处理**:用户的自然语言中如果没有包含任何关于列的约束，请默认将列约束当成查询所有列。
-8.  **操作处理**:对于用户自然语言的动作，请放在query_type中，例如"select","count"
+### 核心任务
+你的目标是将用户的自然语言请求转换为结构化的元数据，供后续的 OPA (Open Policy Agent) 进行鉴权和 SQL 生成。
 
-示例1 - 查询自己信息：
-用户查询："帮我查一下我的工资"
-输出：{{"tables": ["employees"], "columns": ["employees.salary"], "conditions": {{"id": "{user_id}"}}, "query_type": "select"}}
+### 严格解析规则 (必须遵守)
 
-示例2 - 查询所有员工：
-用户查询："查询所有员工的姓名和工资"
-输出：{{"tables": ["employees"], "columns": ["employees.name", "employees.salary"], "conditions": {{}}, "query_type": "select"}}
+1.  **AST 格式强制 (Critical)**：
+    `conditions` 字段必须是字典，Key 为 `Table.Column`，Value **必须是操作符对象列表**。
+    - **标准格式**：`"Table.Column": [{"op": "操作符", "val": 值}]`
+    - **操作符映射指南**：
+        - 等于/是 -> `"="`
+        - 不等于 -> `"!="`
+        - 大于/高于/之后 -> `">"` 或 `">="`
+        - 小于/低于/之前 -> `"<"` 或 `"<="`
+        - 包含/搜索/模糊匹配 -> `"LIKE"` (值需自动包裹 `%`, 如 `"%关键词%"`)
+        - 在...之中 -> `"IN"` (值为数组 `["A", "B"]`)
 
-示例3 - 统计员工个数：
-用户查询："统计所有员工的个数"
-输出：{{"tables": ["employees"], "columns": ["*"], "conditions": {{}}, "query_type": "count"}}
+2.  **命名空间限定 (Namespace)**：
+    `columns` 和 `conditions` 中的所有字段名必须严格遵循 `Table.Column` 格式（例如 `products.price`）。
+    - **严禁**输出不带表前缀的裸列名（如 `price` 是非法的）。
 
-示例4 - 查询跨表信息：
-用户查询："列出财务部员工及其所在城市"
-输出：{{"tables": ["employees", "departments"], "columns": ["employees.name", "departments.location"], "conditions": {{"departments.name": "财务部"}}, "query_type": "select"}}
+3.  **上下文处理**：
+    - **继承**：如果查询隐含指代（如“他们”、“这些”），必须继承历史对话中的筛选条件。
+    - **重置**：如果查询与历史无关，忽略历史上下文。
+
+4.  **个人化查询触发器 (Security)**：
+    - **触发条件**（非常重要！）：只有当用户自然语言中**显式包含**“我的”、“我自己”、“本人”、“我”时。
+    - **执行动作**：在 `conditions` 中追加相应user_info的约束，格式为 `[{"op": "=", "val": "{相应值}"}]`。
+    - **禁止隐含**：如果用户查询中未提到触发条件如“我的”、”我自己“、”本人“时，**严禁**自动添加过滤。
+
+5.  **空缺与默认值**：
+    - `columns`: 如果未指定，默认为 `["*"]`。
+    - `query_type`: 提取动作类型，如 "select", "count", "sum"。
+
+6.  **时间语义标准化协议 (Time Tokenization) - 核心规则**：
+    你必须作为“语义翻译官”，**严禁**自行计算具体日期。所有时间必须转换为以下标准 Token：
+
+    *   **A. 基础锚点 (Base Anchors)**：
+        - 昨天: `{{YESTERDAY}}` | 今天: `{{TODAY}}` | 明天: `{{TOMORROW}}`
+
+    *   **B. 日历窗口 (Calendar Windows - 优先级最高)**：
+        当用户提到完整的自然月/年时，**严禁使用 AGO**，必须使用起止锚点。
+        *格式要求：使用 BETWEEN 操作符*
+        - **本月**: `val: ["{{CURRENT_MONTH_START}}", "{{CURRENT_MONTH_END}}"]`
+        - **上个月**: `val: ["{{LAST_MONTH_START}}", "{{LAST_MONTH_END}}"]`
+        - **今年**: `val: ["{{CURRENT_YEAR_START}}", "{{CURRENT_YEAR_END}}"]`
+        - **去年**: `val: ["{{LAST_YEAR_START}}", "{{LAST_YEAR_END}}"]`
+        - **去年同月**: `val: ["{{LAST_YEAR_SAME_MONTH_START}}", "{{LAST_YEAR_SAME_MONTH_END}}"]`
+
+    *   **C. 滚动窗口 (Rolling Offsets - 仅限“近/前”语境)**：
+        仅在用户明确说“近N天”、“前N个月”时，使用 `AGO` 函数。
+        - **近7天**: `val: ["{{AGO_DAY_7}}", "{{TODAY}} 23:59:59"]`
+        - **近3个月**: `val: ["{{AGO_MONTH_3}}", "{{TODAY}} 23:59:59"]`
+
+    *   **D. 模糊时段 (Intra-day Precision)**：
+        对于一天内的模糊描述，必须基于锚点拼接具体时间：
+        - **凌晨**: `00:00:00` 至 `06:00:00`
+        - **上午/早晨**: `06:00:00` 至 `12:00:00`
+        - **中午**: `11:00:00` 至 `14:00:00`
+        - **下午**: `12:00:00` 至 `18:00:00`
+        - **晚上/今晚**: `18:00:00` 至 `23:59:59`
+        - *示例 ("昨晚")*: `val: ["{{YESTERDAY}} 18:00:00", "{{YESTERDAY}} 23:59:59"]`
+
+    *   **E. 多段对比逻辑 (Disjoint Segments - CRITICAL)**：
+        当查询涉及**不连续的时间段**（如“今年和去年”、“今天和昨天”）时：
+        1. **严禁**将时间合并为一个大范围。
+        2. **必须**输出多个独立的 `BETWEEN` 对象列表。
+        - *示例 ("今天和昨天")*:
+          `"table.time": [`
+             `{"op": "BETWEEN", "val": ["{{YESTERDAY}} 00:00:00", "{{YESTERDAY}} 23:59:59"]},`
+             `{"op": "BETWEEN", "val": ["{{TODAY}} 00:00:00", "{{TODAY}} 23:59:59"]}`
+          `]`
+        
+### 输出格式示例 (Few-Shot)
+
+**User**: "帮我查一下我的订单详情" (User ID: u_001)
+**Output**:
+{
+  "tables": ["orders"],
+  "columns": ["orders.id", "orders.amount", "orders.status", "orders.created_at"],
+  "conditions": {
+    "orders.customer_id": [{"op": "=", "val": "u_001"}]
+  },
+  "query_type": "select"
+}
+
+**User**: "查询上个月处理完成的工单总数"
+**Output**:
+{
+  "tables": ["work_orders"],
+  "columns": ["*"],
+  "conditions": {
+    "work_orders.status": [{"op": "=", "val": "completed"}],
+    "work_orders.processed_at": [
+      {"op": "BETWEEN", "val": ["{{LAST_MONTH_START}}", "{{LAST_MONTH_END}}"]}
+    ]
+  },
+  "query_type": "count"
+}
+
+**User**: "查看过去24小时内包含'服务器'的告警记录"
+**Output**:
+{
+  "tables": ["alarms"],
+  "columns": ["alarms.message", "alarms.timestamp", "alarms.level"],
+  "conditions": {
+    "alarms.message": [{"op": "LIKE", "val": "%服务器%"}],
+    "alarms.timestamp": [
+      {"op": "BETWEEN", "val": ["{{AGO_HOUR_24}}", "{{NOW}}"]}
+    ]
+  },
+  "query_type": "select"
+}
+
+**User**: "统计最近7天的销售额趋势"
+**Output**:
+{
+  "tables": ["sales"],
+  "columns": ["sales.date", "sales.amount"],
+  "conditions": {
+    "sales.date": [
+      {"op": "BETWEEN", "val": ["{{AGO_DAY_7}}", "{{TODAY}} 23:59:59"]}
+    ]
+  },
+  "query_type": "select"
+}
+
+**User**: "本月房价比去年同月高吗？" (跨段对比场景)
+**Output**:
+{
+  "tables": ["house_info"],
+  "columns": ["house_info.price"],
+  "conditions": {
+    "house_info.time": [
+      {"op": "BETWEEN", "val": ["{{LAST_YEAR_SAME_MONTH_START}}", "{{LAST_YEAR_SAME_MONTH_END}}"]},
+      {"op": "BETWEEN", "val": ["{{CURRENT_MONTH_START}}", "{{CURRENT_MONTH_END}}"]}
+    ]
+  },
+  "query_type": "compare"
+}
 """
         
         user_prompt = f"""
@@ -199,14 +312,14 @@ class PermissionController:
 {schema_prompt}
 
 用户查询："{natural_query}"
-用户ID：{user_id}
+用户信息：{user_info}(**只有触发个人查询**的条件时使用)
 历史对话：{history_str}
 
 请返回JSON格式的解析结果，包含以下字段：
 - tables: (list) 涉及的表名列表
-- columns: (list) 需要查询的列名列表  
-- conditions: (dict) 查询条件 (键值对格式)
-- query_type: (str) 操作类型 (例如: "select","count")
+- columns: (list) 需要查询的列名列表,必须以表名.列名的形式输出  
+- conditions: (dict) 查询条件 (AST格式)
+- query_type: (str) 操作类型 (例如: "select","count","sum")
 
 只返回JSON块，不要包含 "```json" 标记或任何其他解释：
 """
@@ -234,12 +347,17 @@ class PermissionController:
         else:
             raise ValueError("无法从LLM响应中提取JSON")
 
-    async def _rewrite_query_with_llm(self, original_query: str, allowed_columns: List[str], row_constraints: Dict[str, Any]) -> str:
+    async def _rewrite_query_with_llm(self, original_query: str, allowed_columns: List[str], row_constraints: Dict[str, Any], policy_id: str) -> str:
         """
         (新) 使用 LLM 重写查询以符合 OPA 约束
         (基于用户提供的 llm_parser.py)
         (已修改) 使用用户指定的 litellm 参数
         """
+        
+        # (可选) 动态从 PolicyManager 加载 schema 描述
+        schema_prompt = await self._get_schema_description(policy_id)
+        if not schema_prompt:
+            schema_prompt = "CREATE TABLE employees (id varchar(100), name varchar(100), salary int, department varchar(50));"
         
         # (已修改) 拆分 system_prompt 和 user_prompt
         system_prompt = """
@@ -247,14 +365,15 @@ class PermissionController:
 
 重写规则：
 1. 只保留允许的列
-2. 添加必要的行级过滤条件 (例如，如果 row_constraints 是 {"id": "emp001"}，查询应被重写为查询该特定用户的信息),但如果row_constraints为空，则不添加任何行级过滤条件
-3. 保持自然语言的表达方式
+2. 添加必要的行级过滤条件 (例如，如果行级约束是 {"id": "emp001"}，查询应被重写为查询用户id为emp001的信息),但如果行级约束为空，则不添加任何行级过滤条件
+3. 在用户原始查询的基础上进行改写，保持自然语言的表达方式
 """
         
         user_prompt = f"""
 原始查询："{original_query}"
 允许查询的列：{allowed_columns}
 行级约束：{row_constraints}
+表字段意义参考: {schema_prompt}
 
 只返回重写后的自然语言查询，不要其他解释
 """
