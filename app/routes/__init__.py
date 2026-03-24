@@ -1,0 +1,14 @@
+from fastapi import APIRouter
+
+from app.routes.config import router as config_router
+from app.routes.test import router as test_router
+from app.routes.batch import router as batch_router
+from app.routes.attack import router as attack_router
+
+
+def register_routes(app):
+    """注册所有路由到 FastAPI 应用"""
+    app.include_router(config_router, prefix="/api")
+    app.include_router(test_router, prefix="/api")
+    app.include_router(batch_router, prefix="/api")
+    app.include_router(attack_router, prefix="/api")

@@ -1,0 +1,37 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local agent/tool metadata
+.claude/
+.codex/
+
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Runtime artifacts
+*.log
+*.pid
+.env
+.env.*
+
+# Large vendored dependency (install via pip when needed)
+EasyJailbreak/
+
+# Large local datasets (keep only docs/loader script)
+datasets/*
+!datasets/README.md
+!datasets/load_datasets.py

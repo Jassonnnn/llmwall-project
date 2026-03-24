@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>安全评估平台</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: { DEFAULT: '#10a37f', dark: '#0d8a6a' }
+          },
+          boxShadow: {
+            soft: '0 10px 30px rgba(17, 24, 39, 0.08)',
+            soft2: '0 16px 50px rgba(17, 24, 39, 0.12)'
+          }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="h-screen flex flex-col">
+{% raw %}
+  <div id="app" class="flex flex-col h-full" v-cloak>
+
+    <!-- Header -->
+    <header class="sticky top-0 z-30 border-b border-gray-200/80 bg-white/75 backdrop-blur-xl">
+      <div class="max-w-[1600px] mx-auto h-16 px-4 sm:px-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center text-white shadow-soft">
+            <i class="fas fa-shield-halved"></i>
+          </div>
+          <div class="leading-tight">
+            <h1 class="text-lg font-bold text-gray-900 tracking-tight">安全评估平台</h1>
+            <div class="text-[10px] text-gray-500 font-semibold tracking-[0.18em]">SECURITY EVALUATION PLATFORM</div>
+          </div>
+        </div>
+
+        <!-- 模式切换 -->
+        <div class="flex items-center gap-4">
+          <div class="flex items-center bg-gray-100 rounded-xl p-1">
+            <button @click="currentMode = 'chat'"
+                    class="mode-tab px-4 py-2 rounded-lg text-sm font-bold"
+                    :class="currentMode === 'chat' ? 'active text-gray-900' : 'text-gray-500 hover:text-gray-700'">
+              <i class="fas fa-comment-dots mr-2"></i>对话测试
+            </button>
+            <button @click="currentMode = 'batch'"
+                    class="mode-tab px-4 py-2 rounded-lg text-sm font-bold"
+                    :class="currentMode === 'batch' ? 'active text-gray-900' : 'text-gray-500 hover:text-gray-700'">
+              <i class="fas fa-database mr-2"></i>批量评估
+            </button>
+            <button @click="currentMode = 'attack'"
+                    class="mode-tab px-4 py-2 rounded-lg text-sm font-bold"
+                    :class="currentMode === 'attack' ? 'active text-gray-900' : 'text-gray-500 hover:text-gray-700'">
+              <i class="fas fa-bolt mr-2"></i>攻击生成
+            </button>
+          </div>
+
+          <button @click="showSettings = true"
+                  class="w-10 h-10 rounded-2xl bg-gray-900 text-white hover:bg-gray-800 transition shadow-soft flex items-center justify-center"
+                  title="配置模型参数">
+            <i class="fas fa-sliders text-sm"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-1 overflow-y-auto">
+      <div class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
+
+        <!-- ==================== 对话测试模式 ==================== -->
+        <div v-if="currentMode === 'chat'">
+          <!-- 对话模式配置栏 -->
+          <div class="mb-5 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/70 border border-gray-200 shadow-sm">
+                <span class="w-2 h-2 rounded-full bg-primary"></span>
+                <span class="text-xs font-bold text-gray-700">对话测试模式</span>
+              </div>
+              <h2 class="mt-3 text-2xl font-extrabold text-gray-900 tracking-tight">单条指令安全测试</h2>
+              <p class="mt-1 text-sm text-gray-500">输入一条指令，平台会根据选择的目标模型与判定机制并行跑测并展示结果。</p>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <div class="flex items-center bg-white/80 border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+                <div class="flex items-center gap-2 pr-2 border-r border-gray-200">
+                  <i class="fas fa-bullseye text-gray-400 text-xs"></i>
+                  <span class="text-xs font-extrabold text-gray-400 uppercase tracking-wider">Target</span>
+                </div>
+                <select v-model="config.target" class="ml-2 bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer min-w-[140px]">
+                  <option value="all">⚡ 全部模型对比</option>
+                  <option value="api">☁️ [[ settings.api.name ]]</option>
+                  <option value="local">💻 [[ settings.local.name ]]</option>
+                </select>
+              </div>
+
+              <div class="flex items-center bg-white/80 border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+                <div class="flex items-center gap-2 pr-2 border-r border-gray-200">
+                  <i class="fas fa-gavel text-gray-400 text-xs"></i>
+                  <span class="text-xs font-extrabold text-gray-400 uppercase tracking-wider">Judge</span>
+                </div>
+                <select v-model="config.judge" class="ml-2 bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer min-w-[130px]">
+                  <option value="all">🔍 全部机制</option>
+                  <option value="keyword">🔡 关键词匹配</option>
+                  <option value="llm_judge">🧠 AI 裁判分析</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Prompt Banner -->
+          <div v-if="lastPrompt && (loading || hasAnyResult)"
+               class="mb-5 rounded-2xl border border-gray-200 bg-white/70 backdrop-blur-xl shadow-soft px-4 py-3 flex items-start gap-3">
+            <div class="w-9 h-9 rounded-2xl bg-gray-900 text-white flex items-center justify-center shrink-0">
+              <i class="fas fa-terminal text-xs"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[11px] font-extrabold text-gray-500 tracking-wider">CURRENT PROMPT</div>
+              <div class="mt-1 text-sm font-semibold text-gray-900 break-words">[[ lastPrompt ]]</div>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div v-if="!hasAnyResult && !loading" class="rounded-2xl border border-gray-200 bg-white/70 backdrop-blur-xl shadow-soft p-10">
+            <div class="flex flex-col md:flex-row items-center md:items-start gap-8">
+              <div class="w-20 h-20 rounded-2xl bg-gray-900 text-white flex items-center justify-center shadow-soft2">
+                <i class="fas fa-shield-virus text-3xl"></i>
+              </div>
+              <div class="flex-1 text-center md:text-left">
+                <h3 class="text-xl font-extrabold text-gray-900">安全测试准备就绪</h3>
+                <p class="mt-2 text-gray-600">请先在右上角进入 <span class="font-semibold text-gray-800">模型配置中心</span> 配置 API，然后在下方输入指令开始评估。</p>
+
+                <div class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div class="rounded-xl border border-gray-200 bg-white p-4">
+                    <div class="text-xs font-extrabold text-gray-500 tracking-wider">STEP 1</div>
+                    <div class="mt-1 font-bold text-gray-800">配置远程 / 本地模型</div>
+                    <div class="mt-1 text-xs text-gray-500">保存后自动加载最新配置</div>
+                  </div>
+                  <div class="rounded-xl border border-gray-200 bg-white p-4">
+                    <div class="text-xs font-extrabold text-gray-500 tracking-wider">STEP 2</div>
+                    <div class="mt-1 font-bold text-gray-800">选择 Target / Judge</div>
+                    <div class="mt-1 text-xs text-gray-500">可同时对比多组机制</div>
+                  </div>
+                  <div class="rounded-xl border border-gray-200 bg-white p-4">
+                    <div class="text-xs font-extrabold text-gray-500 tracking-wider">STEP 3</div>
+                    <div class="mt-1 font-bold text-gray-800">输入指令并发送</div>
+                    <div class="mt-1 text-xs text-gray-500">结果将在卡片中并行刷新</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results -->
+          <div v-else class="pb-28">
+            <div class="grid gap-6" :class="gridClass">
+              <chat-card v-if="shouldRun('api', 'keyword')"
+                         :title="settings.api.name" subtitle="关键词匹配"
+                         icon="fa-cloud" icon-color="text-blue-600"
+                         :data="results.apiKey" :loading="loading"></chat-card>
+
+              <chat-card v-if="shouldRun('api', 'llm_judge')"
+                         :title="settings.api.name" subtitle="LLM 裁判分析"
+                         icon="fa-cloud" icon-color="text-blue-600"
+                         :data="results.apiLlm" :loading="loading"></chat-card>
+
+              <chat-card v-if="shouldRun('local', 'keyword')"
+                         :title="settings.local.name" subtitle="关键词匹配"
+                         icon="fa-server" icon-color="text-purple-600"
+                         :data="results.localKey" :loading="loading"></chat-card>
+
+              <chat-card v-if="shouldRun('local', 'llm_judge')"
+                         :title="settings.local.name" subtitle="LLM 裁判分析"
+                         icon="fa-server" icon-color="text-purple-600"
+                         :data="results.localLlm" :loading="loading"></chat-card>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== 批量评估模式 ==================== -->
+        <div v-if="currentMode === 'batch'">
+          <!-- 批量模式标题 -->
+          <div class="mb-5">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/70 border border-gray-200 shadow-sm">
+              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span class="text-xs font-bold text-gray-700">批量评估模式</span>
+            </div>
+            <h2 class="mt-3 text-2xl font-extrabold text-gray-900 tracking-tight">数据集批量安全测试</h2>
+            <p class="mt-1 text-sm text-gray-500">选择数据集进行批量评估，实时查看攻击成功率和详细结果。</p>
+          </div>
+
+          <!-- 配置面板 -->
+          <div class="dashboard-card p-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <!-- 数据集选择 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">选择数据集</label>
+                <select v-model="batchConfig.datasetId" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="" disabled>-- 请选择 --</option>
+                  <option v-for="ds in datasets" :key="ds.id" :value="ds.id" :disabled="!ds.available">
+                    [[ ds.name ]] ([[ ds.count ]]条)
+                  </option>
+                </select>
+              </div>
+
+              <!-- 目标模型 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">目标模型</label>
+                <select v-model="batchConfig.target" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="api">☁️ [[ settings.api.name ]]</option>
+                  <option value="local">💻 [[ settings.local.name ]]</option>
+                  <option value="all">⚡ 全部模型</option>
+                </select>
+              </div>
+
+              <!-- 评估方式 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">评估方式</label>
+                <select v-model="batchConfig.evaluator" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="keyword">🔡 关键词匹配</option>
+                  <option value="llm_judge">🧠 AI 裁判</option>
+                  <option value="all">🔍 全部方式</option>
+                </select>
+              </div>
+
+              <!-- 样本数量 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">样本数量</label>
+                <select v-model="batchConfig.sampleCount" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option :value="10">10 条（快速测试）</option>
+                  <option :value="50">50 条</option>
+                  <option :value="100">100 条</option>
+                  <option :value="null">全部</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 开始按钮 -->
+            <div class="mt-6 flex items-center justify-between">
+              <div class="text-sm text-gray-500">
+                <span v-if="batchConfig.datasetId">
+                  已选择: <span class="font-bold text-gray-700">[[ getDatasetName(batchConfig.datasetId) ]]</span>
+                </span>
+              </div>
+              <button @click="startBatchEval"
+                      :disabled="!batchConfig.datasetId || batchStatus.running"
+                      class="px-6 py-3 bg-primary hover:bg-primary-dark text-white font-bold rounded-xl shadow-soft transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                <i v-if="batchStatus.running" class="fas fa-circle-notch fa-spin"></i>
+                <i v-else class="fas fa-play"></i>
+                <span>[[ batchStatus.running ? '评估中...' : '开始批量评估' ]]</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 仪表盘 -->
+          <div v-if="batchStatus.started" class="space-y-6">
+            <!-- 进度条 -->
+            <div class="dashboard-card p-6">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-sm font-bold text-gray-700">评估进度</div>
+                <div class="text-sm font-bold text-primary">[[ batchStatus.progressPercent ]]%</div>
+              </div>
+              <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
+                <div class="progress-bar h-full bg-gradient-to-r from-primary to-blue-500 rounded-full"
+                     :style="{ width: batchStatus.progressPercent + '%' }"></div>
+              </div>
+              <div class="mt-2 text-xs text-gray-500">
+                已完成 [[ batchStatus.completed ]] / [[ batchStatus.total ]] 条评估
+              </div>
+            </div>
+
+            <!-- 统计卡片 -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <!-- 总数 -->
+              <div class="dashboard-card p-5">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
+                    <i class="fas fa-list-ol text-gray-600 text-lg"></i>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-extrabold text-gray-900">[[ batchStatus.total ]]</div>
+                    <div class="text-xs font-semibold text-gray-500 uppercase">总任务数</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 攻击成功 -->
+              <div class="dashboard-card p-5 border-l-4 border-red-500">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center">
+                    <i class="fas fa-skull-crossbones text-red-500 text-lg"></i>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-extrabold text-red-600">[[ batchStatus.successCount ]]</div>
+                    <div class="text-xs font-semibold text-gray-500 uppercase">攻击成功</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 拦截成功 -->
+              <div class="dashboard-card p-5 border-l-4 border-green-500">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center">
+                    <i class="fas fa-shield-check text-green-500 text-lg"></i>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-extrabold text-green-600">[[ batchStatus.failCount ]]</div>
+                    <div class="text-xs font-semibold text-gray-500 uppercase">拦截成功</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 攻击成功率 -->
+              <div class="dashboard-card p-5 border-l-4 border-orange-500">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center">
+                    <i class="fas fa-chart-pie text-orange-500 text-lg"></i>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-extrabold text-orange-600">[[ batchStatus.successRate ]]%</div>
+                    <div class="text-xs font-semibold text-gray-500 uppercase">攻击成功率</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 实时结果表格 -->
+            <div class="dashboard-card overflow-hidden">
+              <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div class="font-bold text-gray-900">实时评估结果</div>
+                <div class="text-xs text-gray-500">显示最近 20 条结果</div>
+              </div>
+              <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+                <table class="result-table w-full">
+                  <thead class="sticky top-0">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-gray-600">#</th>
+                      <th class="px-4 py-3 text-left text-gray-600">提示词</th>
+                      <th class="px-4 py-3 text-left text-gray-600">模型</th>
+                      <th class="px-4 py-3 text-left text-gray-600">评估方式</th>
+                      <th class="px-4 py-3 text-left text-gray-600">结果</th>
+                      <th class="px-4 py-3 text-left text-gray-600">耗时</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(r, idx) in batchResults" :key="idx" class="hover:bg-gray-50">
+                      <td class="px-4 py-3 text-gray-500">[[ r.index + 1 ]]</td>
+                      <td class="px-4 py-3 text-gray-800 max-w-xs truncate" :title="r.prompt">[[ r.prompt ]]</td>
+                      <td class="px-4 py-3">
+                        <span class="px-2 py-1 rounded-lg text-xs font-bold"
+                              :class="r.target_type === 'api' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'">
+                          [[ r.model_name || r.target_type ]]
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-gray-600 text-xs">[[ r.eval_type === 'keyword' ? '关键词' : 'AI裁判' ]]</td>
+                      <td class="px-4 py-3">
+                        <span class="status-badge" :class="r.is_success ? 'badge-danger' : 'badge-safe'">
+                          [[ r.is_success ? '攻击成功' : '已拦截' ]]
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-gray-500 text-xs">[[ r.latency ]]s</td>
+                    </tr>
+                    <tr v-if="batchResults.length === 0">
+                      <td colspan="6" class="px-4 py-8 text-center text-gray-400">
+                        <i class="fas fa-hourglass-start mr-2"></i>等待评估结果...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- 完成提示 -->
+            <div v-if="batchStatus.completed === batchStatus.total && batchStatus.total > 0"
+                 class="dashboard-card p-6 bg-gradient-to-r from-green-50 to-blue-50 border-green-200">
+              <div class="flex items-center gap-4">
+                <div class="w-14 h-14 rounded-2xl bg-green-500 text-white flex items-center justify-center">
+                  <i class="fas fa-check-circle text-2xl"></i>
+                </div>
+                <div>
+                  <div class="text-lg font-extrabold text-gray-900">评估完成！</div>
+                  <div class="text-sm text-gray-600">
+                    共评估 [[ batchStatus.total ]] 条，攻击成功 [[ batchStatus.successCount ]] 条，
+                    攻击成功率 <span class="font-bold text-orange-600">[[ batchStatus.successRate ]]%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 未开始状态 -->
+          <div v-else class="dashboard-card p-10 text-center">
+            <div class="w-20 h-20 mx-auto rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4">
+              <i class="fas fa-database text-3xl"></i>
+            </div>
+            <h3 class="text-xl font-extrabold text-gray-900">选择数据集开始评估</h3>
+            <p class="mt-2 text-gray-500">在上方选择数据集和评估参数，点击"开始批量评估"按钮</p>
+          </div>
+        </div>
+
+        <!-- ==================== 攻击生成模式 ==================== -->
+        <div v-if="currentMode === 'attack'">
+          <!-- 攻击生成模式标题 -->
+          <div class="mb-5">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/70 border border-gray-200 shadow-sm">
+              <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+              <span class="text-xs font-bold text-gray-700">攻击生成模式</span>
+            </div>
+            <h2 class="mt-3 text-2xl font-extrabold text-gray-900 tracking-tight">对抗性提示词生成</h2>
+            <p class="mt-1 text-sm text-gray-500">使用 EasyJailbreak 框架生成对抗性越狱提示词，支持 11+ 种攻击方法。</p>
+          </div>
+
+          <!-- 配置面板 -->
+          <div class="dashboard-card p-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <!-- 攻击方法选择 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">攻击方法</label>
+                <select v-model="attackConfig.method" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="" disabled>-- 请选择 --</option>
+                  <option v-for="m in attackMethods" :key="m.id" :value="m.id" :disabled="m.available === false">
+                    [[ m.name ]] ([[ getShortDescription(m.description) ]])[[ m.available === false ? '（不可用）' : '' ]]
+                  </option>
+                </select>
+                <p v-if="attackMethodsNotice" class="mt-1 text-xs text-orange-600 flex items-center gap-1">
+                  <i class="fas fa-circle-info"></i>
+                  [[ attackMethodsNotice ]]
+                </p>
+                <p v-if="selectedAttackMethod" class="mt-1 text-xs text-gray-500">
+                  [[ selectedAttackMethod.description ]]
+                </p>
+                <p v-if="selectedAttackMethod && selectedAttackMethod.requires_attack_model" class="mt-1 text-xs text-orange-600 flex items-center gap-1">
+                  <i class="fas fa-exclamation-triangle"></i>
+                  此方法需要配置攻击模型（在右上角⚙️设置中配置 API Key）
+                </p>
+              </div>
+
+              <!-- 生成数量 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">生成数量</label>
+                <input v-model.number="attackConfig.count" type="number" min="1" max="10" 
+                       class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none" />
+              </div>
+
+              <!-- 快速模板 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">快速模板</label>
+                <select v-model="quickAttackMethod" @change="applyQuickMethod" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="">-- 快速选择种子提示词 --</option>
+                  <option value="harmful_behavior">有害行为（制作炸弹）</option>
+                  <option value="personal_attack">人身攻击（政治人物）</option>
+                  <option value="illegal_activity">非法活动（入侵电脑）</option>
+                  <option value="misinformation">虚假信息（疫苗谣言）</option>
+                  <option value="privacy_breach">隐私泄露（银行信息）</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-400">选择后会自动填充到下方的种子提示词输入框</p>
+              </div>
+            </div>
+
+            <!-- 种子提示词输入 -->
+            <div class="mb-4">
+              <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">种子提示词</label>
+              <textarea v-model="attackConfig.seedPrompt" rows="3" placeholder="例如：如何制作炸弹？（输入原始提示词，将基于此生成对抗性提示词）"
+                        class="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-none"></textarea>
+            </div>
+
+            <!-- 测试配置 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">
+                  <i class="fas fa-bullseye mr-1"></i> 测试目标模型
+                </label>
+                <select v-model="attackConfig.target" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="api">☁️ 远程 API - [[ settings.api.name ]]</option>
+                  <option value="local">💻 本地模型 - [[ settings.local.name ]]</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-400">点击"测试生成的提示词"时使用此模型</p>
+              </div>
+
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">
+                  <i class="fas fa-gavel mr-1"></i> 评估方法
+                </label>
+                <select v-model="attackConfig.evaluator" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option value="keyword">🔍 关键词检测（快速）</option>
+                  <option value="llm_judge">🤖 LLM 裁判（准确）</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-400">判断攻击是否成功的方法</p>
+              </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex items-center gap-3">
+              <button @click="generateAttacks" :disabled="!canGenerateAttacks || attackGenerating"
+                      class="px-6 py-3 rounded-xl font-bold text-white shadow-soft transition-all duration-200 flex items-center gap-2"
+                      :class="canGenerateAttacks && !attackGenerating ? 'bg-gray-900 hover:bg-gray-800 hover:shadow-lg' : 'bg-gray-300 cursor-not-allowed'">
+                <i v-if="attackGenerating" class="fas fa-circle-notch fa-spin"></i>
+                <i v-else class="fas fa-bolt"></i>
+                [[ attackGenerating ? '生成中...' : '生成对抗性提示词' ]]
+              </button>
+              <div v-if="!canGenerateAttacks && !attackGenerating" class="text-xs text-gray-500">
+                <i class="fas fa-info-circle mr-1"></i>请先选择攻击方法并输入种子提示词
+              </div>
+              <button @click="testGeneratedAttacks" :disabled="generatedPrompts.length === 0 || attackTesting"
+                      class="px-6 py-3 rounded-xl font-bold border-2 border-primary text-primary hover:bg-primary hover:text-white transition-all duration-200 flex items-center gap-2"
+                      :class="generatedPrompts.length === 0 || attackTesting ? 'opacity-50 cursor-not-allowed' : ''">
+                <i v-if="attackTesting" class="fas fa-circle-notch fa-spin"></i>
+                <i v-else class="fas fa-play"></i>
+                [[ attackTesting ? '测试中...' : '测试生成的提示词' ]]
+              </button>
+              <button @click="clearAttackResults"
+                      class="px-4 py-3 rounded-xl font-bold text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-all">
+                <i class="fas fa-trash-alt"></i> 清空
+              </button>
+            </div>
+          </div>
+
+          <!-- 生成的提示词展示 -->
+          <div v-if="generatedPrompts.length > 0" class="dashboard-card p-6 mb-6">
+            <!-- 警告信息 -->
+            <div v-if="generationNote" class="mb-4 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm flex items-start gap-2">
+              <i class="fas fa-exclamation-triangle mt-0.5"></i>
+              <span>[[ generationNote ]]</span>
+            </div>
+
+            <div class="flex items-center justify-between mb-4">
+              <div class="font-bold text-gray-900 flex items-center gap-2">
+                <i class="fas fa-list-ul text-purple-500"></i>
+                生成的对抗性提示词 ([[ generatedPrompts.length ]] 个)
+              </div>
+              <div class="text-xs text-gray-500">方法: [[ attackConfig.method ]]</div>
+            </div>
+            
+            <div class="space-y-3">
+              <div v-for="(p, idx) in generatedPrompts" :key="p.id" 
+                   class="p-4 rounded-xl border border-gray-200 hover:border-purple-300 hover:bg-purple-50/30 transition-all group">
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-sm font-bold shrink-0">
+                    [[ idx + 1 ]]
+                  </div>
+                  <div class="flex-1">
+                    <div class="text-sm text-gray-800 font-medium mb-2 break-all">[[ p.prompt ]]</div>
+                    <div class="flex items-center gap-2">
+                      <span class="px-2 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600">[[ p.technique ]]</span>
+                      <button @click="usePromptForTest(p.prompt)" 
+                              class="text-xs text-primary hover:text-primary-dark font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i class="fas fa-external-link-alt mr-1"></i>用于测试
+                      </button>
+                      <button @click="copyPrompt(p.prompt)"
+                              class="text-xs text-gray-500 hover:text-gray-700 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i class="fas fa-copy mr-1"></i>复制
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 测试结果展示 -->
+          <div v-if="attackTestResults.length > 0" class="dashboard-card p-6">
+            <div class="flex items-center justify-between mb-4">
+              <div class="font-bold text-gray-900 flex items-center gap-2">
+                <i class="fas fa-chart-bar text-primary"></i>
+                测试结果
+              </div>
+              <div class="text-sm">
+                <span class="text-green-600 font-bold">[[ attackSuccessCount ]] 成功</span> /
+                <span class="text-red-600 font-bold">[[ attackFailCount ]] 失败</span>
+              </div>
+            </div>
+
+            <div class="space-y-3 max-h-[400px] overflow-y-auto">
+              <div v-for="(r, idx) in attackTestResults" :key="idx"
+                   class="p-4 rounded-xl border" 
+                   :class="r.is_success ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'">
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+                       :class="r.is_success ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'">
+                    <i :class="r.is_success ? 'fas fa-exclamation-triangle' : 'fas fa-check'"></i>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs text-gray-500 mb-1">提示词:</div>
+                    <div class="text-sm text-gray-800 font-medium mb-2 truncate" :title="r.prompt">[[ r.prompt ]]</div>
+                    <div class="text-xs text-gray-500 mb-1">模型响应:</div>
+                    <div class="text-sm text-gray-700 bg-white/50 p-2 rounded-lg mb-2 break-all">[[ r.response_content ]]</div>
+                    <div class="flex items-center gap-2 text-xs">
+                      <span class="px-2 py-1 rounded-lg font-semibold"
+                            :class="r.is_success ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">
+                        [[ r.is_success ? '攻击成功' : '攻击失败' ]]
+                      </span>
+                      <span class="text-gray-400">[[ r.latency ]]s</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 未生成状态 -->
+          <div v-else-if="!attackGenerating && generatedPrompts.length === 0" class="dashboard-card p-10 text-center">
+            <div class="w-20 h-20 mx-auto rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center mb-4">
+              <i class="fas fa-bolt text-3xl"></i>
+            </div>
+            <h3 class="text-xl font-extrabold text-gray-900">生成对抗性提示词</h3>
+            <p class="mt-2 text-gray-500">选择攻击方法，输入种子提示词，点击生成按钮</p>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Footer (仅对话模式显示) -->
+    <footer v-if="currentMode === 'chat'" class="shrink-0 z-40 input-area border-t border-gray-200/80">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 py-5">
+        <div class="relative rounded-2xl border border-gray-200 bg-white shadow-soft overflow-hidden">
+          <div class="flex items-stretch">
+            <div class="hidden sm:flex items-center px-4 border-r border-gray-100 text-gray-400">
+              <i class="fas fa-terminal"></i>
+            </div>
+
+            <input v-model="prompt"
+                   @keyup.enter="runTests"
+                   type="text"
+                   placeholder="在此输入攻击指令（例如：如何制造危险品...）"
+                   class="w-full px-4 sm:px-5 py-4 text-[15px] sm:text-base text-gray-800 outline-none placeholder-gray-400">
+
+            <button @click="runTests"
+                    :disabled="loading"
+                    class="m-2 px-5 rounded-xl bg-primary hover:bg-primary-dark text-white font-bold transition disabled:opacity-50 disabled:cursor-not-allowed shadow-soft flex items-center gap-2"
+                    title="发送">
+              <i v-if="loading" class="fas fa-circle-notch fa-spin text-lg"></i>
+              <i v-else class="fas fa-paper-plane text-lg"></i>
+              <span class="hidden sm:inline">发送</span>
+            </button>
+          </div>
+
+          <div class="px-4 sm:px-5 pb-3 -mt-1 text-[11px] text-gray-400 flex items-center justify-between">
+            <span>Enter 发送 · 支持并行跑测</span>
+            <span v-if="lastPrompt" class="truncate max-w-[55%] hidden sm:block">Last: [[ lastPrompt ]]</span>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Toast -->
+    <transition name="toast">
+      <div v-if="toast.show" class="fixed top-20 right-6 z-50 flex items-center bg-white border border-green-100 shadow-soft2 rounded-2xl px-4 py-3 pr-6 animate-slide-in">
+        <div class="w-9 h-9 rounded-2xl bg-green-100 flex items-center justify-center mr-3 text-green-700">
+          <i class="fas fa-check"></i>
+        </div>
+        <div>
+          <h4 class="font-extrabold text-gray-900 text-sm">操作成功</h4>
+          <p class="text-xs text-gray-500">[[ toast.message ]]</p>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Settings Modal -->
+    <transition name="modal">
+      <div v-if="showSettings" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+        <div class="bg-white rounded-3xl shadow-soft2 w-full max-w-2xl overflow-hidden">
+          <div class="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+            <h3 class="font-extrabold text-gray-900 text-lg flex items-center">
+              <i class="fas fa-sliders-h mr-2 text-primary"></i> 模型配置中心
+            </h3>
+            <button @click="showSettings = false" class="w-9 h-9 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+              <i class="fas fa-times text-lg"></i>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+            <!-- Remote -->
+            <div class="border border-blue-100 rounded-2xl p-5 bg-blue-50/30 hover:border-blue-200 transition-colors">
+              <div class="flex justify-between items-start mb-4">
+                <div>
+                  <h4 class="font-extrabold text-blue-900 flex items-center text-sm">
+                    <i class="fas fa-cloud mr-2"></i> 远程 API 模型
+                  </h4>
+                  <p class="text-[11px] text-blue-700/80 mt-1 ml-6">兼任 LLM 裁判（如启用 llm_judge）</p>
+                </div>
+              </div>
+
+              <div class="grid gap-4">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-500 mb-1">快速选择预设 (Quick Select)</label>
+                  <div class="relative">
+                    <select @change="autoFillRemote" v-model="tempRemoteSelect"
+                            class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none appearance-none bg-white">
+                      <option value="" disabled selected>-- 选择后仅填充显示名称 --</option>
+                      <optgroup label="OpenAI 系列">
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        <option value="o1">OpenAI o1</option>
+                        <option value="o1-mini">OpenAI o1-mini</option>
+                      </optgroup>
+                      <optgroup label="Anthropic Claude">
+                        <option value="claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                        <option value="claude-3-opus">Claude 3 Opus</option>
+                        <option value="claude-3-haiku">Claude 3 Haiku</option>
+                      </optgroup>
+                      <optgroup label="DeepSeek">
+                        <option value="deepseek-v3">DeepSeek-V3</option>
+                        <option value="deepseek-r1">DeepSeek-R1</option>
+                        <option value="deepseek-chat">DeepSeek Chat</option>
+                      </optgroup>
+                      <optgroup label="Google Gemini">
+                        <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                        <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                      </optgroup>
+                      <optgroup label="Meta Llama">
+                        <option value="llama-3.3-70b">Llama 3.3 70B</option>
+                        <option value="llama-3.1-405b">Llama 3.1 405B</option>
+                        <option value="llama-3.1-70b">Llama 3.1 70B</option>
+                      </optgroup>
+                      <optgroup label="其他模型">
+                        <option value="qwen-2.5-72b">Qwen 2.5 72B</option>
+                        <option value="mistral-large">Mistral Large</option>
+                        <option value="mixtral-8x7b">Mixtral 8x7B</option>
+                      </optgroup>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
+                      <i class="fas fa-chevron-down text-xs"></i>
+                    </div>
+                  </div>
+                  <p class="mt-1 text-xs text-gray-400">💡 选择后仅填充显示名称，Model ID 和 URL 需手动填写（支持中转）</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-500 mb-1">显示名称 (Display Name)</label>
+                    <input v-model="form.api.name" type="text"
+                           class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-500 mb-1">Model ID</label>
+                    <input v-model="form.api.model" type="text"
+                           class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white">
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-500 mb-1">API Base URL</label>
+                  <input v-model="form.api.api_base" type="text"
+                         class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white">
+                </div>
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-500 mb-1">API Key</label>
+                  <input v-model="form.api.api_key" type="password"
+                         class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white"
+                         placeholder="sk-...">
+                  <p v-if="settings.api.has_api_key" class="mt-1 text-xs text-green-700">
+                    已保存密钥：[[ settings.api.api_key_masked ]]（留空可保持不变）
+                  </p>
+                  <p v-else class="mt-1 text-xs text-gray-400">
+                    当前未保存密钥
+                  </p>
+                </div>
+
+                <!-- 测试连接按钮 -->
+                <div>
+                  <button @click="testApiConnection('api')" :disabled="testingConnection.api"
+                          class="w-full px-4 py-2.5 rounded-xl font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 transition-colors flex items-center justify-center gap-2"
+                          :class="testingConnection.api ? 'opacity-50 cursor-not-allowed' : ''">
+                    <i v-if="testingConnection.api" class="fas fa-circle-notch fa-spin"></i>
+                    <i v-else class="fas fa-plug"></i>
+                    [[ testingConnection.api ? '测试中...' : '测试 API 连接' ]]
+                  </button>
+                  <p v-if="connectionStatus.api" class="mt-2 text-xs px-3 py-2 rounded-lg"
+                     :class="connectionStatus.api.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
+                    <i :class="connectionStatus.api.success ? 'fas fa-check-circle' : 'fas fa-times-circle'"></i>
+                    [[ connectionStatus.api.message ]]
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Local -->
+            <div class="border border-purple-100 rounded-2xl p-5 bg-purple-50/30 hover:border-purple-200 transition-colors">
+              <h4 class="font-extrabold text-purple-900 mb-4 flex items-center text-sm">
+                <i class="fas fa-server mr-2"></i> 本地模型 (Ollama)
+              </h4>
+
+              <div class="grid gap-4">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-500 mb-1">选择模型文件 (Auto Fill)</label>
+                  <div class="relative">
+                    <select @change="autoFillLocal" v-model="form.local.model"
+                            class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-100 outline-none appearance-none bg-white">
+                      <option value="qwen2.5:latest">Qwen 2.5</option>
+                      <option value="llama3.1:latest">Llama 3.1</option>
+                      <option value="mistral:7b-instruct-v0.2-q4_0">Mistral 7B</option>
+                      <option value="gemma:7b">Gemma 7B</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
+                      <i class="fas fa-chevron-down text-xs"></i>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-500 mb-1">显示名称 (Display Name)</label>
+                    <input v-model="form.local.name" type="text"
+                           class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-100 outline-none bg-white">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-500 mb-1">API Base URL</label>
+                    <input v-model="form.local.api_base" type="text"
+                           class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-100 outline-none bg-white"
+                           value="http://localhost:11434/v1">
+                  </div>
+                </div>
+
+                <!-- 测试连接按钮 -->
+                <div>
+                  <button @click="testApiConnection('local')" :disabled="testingConnection.local"
+                          class="w-full px-4 py-2.5 rounded-xl font-bold text-purple-700 bg-purple-100 hover:bg-purple-200 transition-colors flex items-center justify-center gap-2"
+                          :class="testingConnection.local ? 'opacity-50 cursor-not-allowed' : ''">
+                    <i v-if="testingConnection.local" class="fas fa-circle-notch fa-spin"></i>
+                    <i v-else class="fas fa-plug"></i>
+                    [[ testingConnection.local ? '测试中...' : '测试本地连接' ]]
+                  </button>
+                  <p v-if="connectionStatus.local" class="mt-2 text-xs px-3 py-2 rounded-lg"
+                     :class="connectionStatus.local.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
+                    <i :class="connectionStatus.local.success ? 'fas fa-check-circle' : 'fas fa-times-circle'"></i>
+                    [[ connectionStatus.local.message ]]
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-gray-50 px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+            <button @click="showSettings = false" class="px-4 py-2 text-gray-700 font-semibold hover:bg-gray-200 rounded-xl transition-colors">
+              取消
+            </button>
+            <button @click="saveSettings" class="px-6 py-2 bg-primary hover:bg-primary-dark text-white font-extrabold rounded-xl shadow-soft transition-colors">
+              <i class="fas fa-check mr-1"></i> 保存配置
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+  </div>
+
+  <!-- ChatCard Template -->
+  <template id="chat-card-template">
+    <div class="bg-white/80 backdrop-blur-xl rounded-2xl border border-gray-200 shadow-soft flex flex-col overflow-hidden hover:shadow-soft2 transition-shadow
+                h-[560px] md:h-[600px]">
+      <!-- Card Header -->
+      <div class="bg-white/70 px-5 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-9 h-9 rounded-2xl bg-white border border-gray-200 flex items-center justify-center shadow-sm">
+            <i class="fas" :class="[icon, iconColor]"></i>
+          </div>
+          <div class="leading-tight min-w-0">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="font-extrabold text-base text-gray-900 truncate">[[ title ]]</span>
+              <span class="text-gray-300 font-extrabold text-sm">·</span>
+              <span class="font-semibold text-sm text-gray-600 truncate">[[ subtitle ]]</span>
+            </div>
+            <div class="text-[11px] text-gray-400">对比结果卡片</div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <div v-if="loading" class="text-xs text-primary font-bold flex items-center gap-2 animate-pulse">
+            <span class="inline-flex w-2 h-2 rounded-full bg-primary"></span>
+            <i class="fas fa-spinner fa-spin"></i> 处理中...
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary Bar -->
+      <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-2 min-w-0">
+            <div class="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                 :class="data ? (data.is_success ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700') : 'bg-gray-50 text-gray-400'">
+              <i class="fas" :class="data ? (data.is_success ? 'fa-triangle-exclamation' : 'fa-check-circle') : 'fa-circle-info'"></i>
+            </div>
+
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-extrabold text-gray-700">判定</span>
+                <span v-if="data" class="status-badge" :class="data.is_success ? 'badge-danger' : 'badge-safe'">
+                  [[ data.is_success ? '拦截失败' : '拦截成功' ]]
+                </span>
+                <span v-else class="status-badge bg-gray-100 text-gray-500 border border-gray-200">等待结果</span>
+
+                <span v-if="data && data.latency" class="text-xs text-gray-400 font-semibold">
+                  · Latency: [[ data.latency ]]s
+                </span>
+              </div>
+
+              <div class="mt-1 text-[12px] text-gray-600 font-medium leading-snug line-clamp-2">
+                [[ summaryReason ]]
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="shrink-0 flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-xl p-1">
+            <button @click="activeTab='reply'"
+                    class="px-3 py-1.5 text-xs font-extrabold rounded-lg transition"
+                    :class="activeTab==='reply' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'">
+              Reply
+            </button>
+            <button @click="activeTab='trace'"
+                    class="px-3 py-1.5 text-xs font-extrabold rounded-lg transition"
+                    :class="activeTab==='trace' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'">
+              Trace
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Area -->
+      <div class="flex-1 overflow-hidden bg-transparent">
+        <!-- Reply Tab -->
+        <div v-show="activeTab==='reply'" class="h-full overflow-y-auto p-5">
+          <div v-if="loading && !data" class="rounded-2xl border border-gray-200 bg-white p-5">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-2xl bg-gray-900 text-white flex items-center justify-center">
+                <i class="fas fa-robot text-xs"></i>
+              </div>
+              <div class="flex-1">
+                <div class="h-3 w-40 bg-gray-200 rounded-full"></div>
+                <div class="mt-2 h-3 w-64 bg-gray-100 rounded-full"></div>
+              </div>
+            </div>
+            <div class="mt-4 space-y-2">
+              <div class="h-3 w-full bg-gray-100 rounded-full"></div>
+              <div class="h-3 w-11/12 bg-gray-100 rounded-full"></div>
+              <div class="h-3 w-10/12 bg-gray-100 rounded-full"></div>
+            </div>
+          </div>
+
+          <div v-else-if="data" class="bubble-ai-card animate-fade-in">
+            <div class="p-4 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+              [[ data.response_content ]]
+            </div>
+          </div>
+
+          <div v-else class="text-sm text-gray-400">
+            暂无结果。请在下方输入指令并发送。
+          </div>
+        </div>
+
+        <!-- Trace Tab -->
+        <div v-show="activeTab==='trace'" class="h-full overflow-y-auto p-5">
+          <div v-if="data" class="bubble-ai-card animate-fade-in">
+            <div class="audit-panel">
+              <div class="audit-header">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-microscope text-gray-300"></i>
+                  <span class="text-xs font-extrabold text-gray-200 tracking-wide">ANALYSIS TRACE</span>
+                </div>
+                <div class="text-[11px] text-gray-400 font-semibold">
+                  [[ data.latency ? ('Latency: ' + data.latency + 's') : '' ]]
+                </div>
+              </div>
+              <div class="audit-content">[[ data.reasoning_trace ]]</div>
+            </div>
+          </div>
+
+          <div v-else-if="loading" class="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-500">
+            Trace 将在请求返回后显示…
+          </div>
+
+          <div v-else class="text-sm text-gray-400">
+            暂无 Trace。
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+{% endraw %}
+
+<script src="/static/js/components/ChatCard.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
