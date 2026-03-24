@@ -561,7 +561,10 @@
                 <i class="fas fa-list-ul text-purple-500"></i>
                 生成的对抗性提示词 ([[ generatedPrompts.length ]] 个)
               </div>
-              <div class="text-xs text-gray-500">方法: [[ attackConfig.method ]]</div>
+              <div class="text-xs text-gray-500">
+                方法: [[ attackConfig.method ]]
+                <span v-if="generationMode"> | 来源: [[ getGenerationModeLabel(generationMode) ]]</span>
+              </div>
             </div>
             
             <div class="space-y-3">

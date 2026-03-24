@@ -3,8 +3,13 @@
 用于生成对抗性越狱提示词
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from functools import lru_cache
+import importlib
 import logging
+import os
+import sys
 
 BASIC_ATTACK_METHODS = {
     "basic_jailbreak": {
@@ -60,8 +65,9 @@ ATTACK_METHODS = {
         "name": "AutoDAN",
         "description": "Automatic DAN - 自动生成对抗性提示词",
         "class_path": "easyjailbreak.attacker.AutoDAN_Liu_2023.AutoDAN",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
+        "requires_whitebox_model": True,
     },
     "GPTFuzz": {
         "name": "GPTFuzz",
@@ -123,18 +129,58 @@ ATTACK_METHODS = {
         "name": "GCG",
         "description": "梯度引导攻击 - 基于梯度优化的对抗性后缀生成",
         "class_path": "easyjailbreak.attacker.GCG_Zou_2023.GCG",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
+        "requires_whitebox_model": True,
     },
 }
 
+REAL_ATTACK_METHODS = {"PAIR", "TAP", "GCG", "AutoDAN"}
+EASYJAILBREAK_LOCAL_PATH = Path(__file__).resolve().parents[2] / "EasyJailbreak"
 
-def check_easyjailbreak_dependency() -> Dict[str, Any]:
+
+def _ensure_easyjailbreak_importable() -> None:
+    """优先导入 pip 安装包；若不存在则回退到仓库内置 EasyJailbreak 目录。"""
     try:
-        import easyjailbreak  # noqa: F401
-        return {"available": True, "reason": ""}
+        importlib.import_module("easyjailbreak.datasets.instance")
+        return
+    except Exception:
+        pass
+
+    local_path = str(EASYJAILBREAK_LOCAL_PATH)
+    if EASYJAILBREAK_LOCAL_PATH.exists() and local_path not in sys.path:
+        sys.path.insert(0, local_path)
+
+    # 二次导入，失败则抛出给上层处理
+    importlib.import_module("easyjailbreak.datasets.instance")
+
+
+def _has_whitebox_model_config() -> bool:
+    return bool(os.environ.get("EASYJAILBREAK_WHITEBOX_MODEL_PATH"))
+
+
+def _parse_class_path(class_path: str) -> Tuple[str, str]:
+    module_path, class_name = class_path.rsplit(".", 1)
+    return module_path, class_name
+
+
+@lru_cache(maxsize=32)
+def _check_easyjailbreak_dependency_cached(method_key: str) -> Tuple[bool, str]:
+    try:
+        _ensure_easyjailbreak_importable()
+        importlib.import_module("easyjailbreak.models.openai_model")
+
+        if method_key and method_key in ATTACK_METHODS:
+            module_path, _ = _parse_class_path(ATTACK_METHODS[method_key]["class_path"])
+            importlib.import_module(module_path)
+        return True, ""
     except Exception as exc:
-        return {"available": False, "reason": str(exc)}
+        return False, str(exc)
+
+
+def check_easyjailbreak_dependency(method: Optional[str] = None) -> Dict[str, Any]:
+    available, reason = _check_easyjailbreak_dependency_cached(method or "")
+    return {"available": available, "reason": reason}
 
 
 def get_available_attack_methods() -> List[Dict[str, Any]]:
@@ -152,17 +198,26 @@ def get_available_attack_methods() -> List[Dict[str, Any]]:
     ]
 
     dep = check_easyjailbreak_dependency()
-    if dep["available"]:
-        methods.extend(
+    for key, config in ATTACK_METHODS.items():
+        requires_whitebox = bool(config.get("requires_whitebox_model", False))
+        whitebox_ready = _has_whitebox_model_config() if requires_whitebox else True
+        methods.append(
             {
                 "id": key,
                 "name": config["name"],
                 "description": config["description"],
                 "requires_attack_model": config["requires_attack_model"],
                 "requires_eval_model": config["requires_eval_model"],
-                "available": True,
+                "requires_whitebox_model": requires_whitebox,
+                "available": bool(dep["available"] and whitebox_ready),
+                "availability_reason": (
+                    dep["reason"]
+                    if not dep["available"]
+                    else "缺少 EASYJAILBREAK_WHITEBOX_MODEL_PATH 配置"
+                    if not whitebox_ready
+                    else ""
+                ),
             }
-            for key, config in ATTACK_METHODS.items()
         )
 
     return methods
@@ -222,6 +277,249 @@ def simple_mutate_prompt(prompt: str, method: str) -> List[str]:
     return variations
 
 
+class AttackConfigError(Exception):
+    """攻击方法配置缺失或不满足执行条件。"""
+
+    def __init__(self, message: str, code: str = "INVALID_ATTACK_CONFIG"):
+        super().__init__(message)
+        self.code = code
+
+
+def _load_symbol(module_path: str, symbol_name: str):
+    module = importlib.import_module(module_path)
+    return getattr(module, symbol_name)
+
+
+def _load_attacker_class(method: str):
+    class_path = ATTACK_METHODS[method]["class_path"]
+    module_path, class_name = _parse_class_path(class_path)
+    return _load_symbol(module_path, class_name)
+
+
+def _build_openai_model(model_name: Optional[str], api_key: Optional[str], api_base: Optional[str]):
+    if not api_key or not model_name:
+        raise AttackConfigError(
+            "需要 API Key 和 Model ID 才能执行真实攻击方法。",
+            code="MISSING_ATTACK_MODEL_CONFIG",
+        )
+    openai_model_cls = _load_symbol("easyjailbreak.models.openai_model", "OpenaiModel")
+    return openai_model_cls(model_name=model_name, api_keys=api_key, base_url=api_base)
+
+
+def _build_dataset(seed_prompt: str, count: int):
+    instance_cls = _load_symbol("easyjailbreak.datasets.instance", "Instance")
+    dataset_cls = _load_symbol("easyjailbreak.datasets.jailbreak_datasets", "JailbreakDataset")
+    reference_response = os.environ.get(
+        "EASYJAILBREAK_REFERENCE_RESPONSE",
+        "Sure, I can provide a detailed answer.",
+    )
+    instances = [
+        instance_cls(query=seed_prompt, reference_responses=[reference_response])
+        for _ in range(max(1, count))
+    ]
+    return dataset_cls(instances)
+
+
+def _extract_prompt_text(instance: Any) -> str:
+    prompt_text = getattr(instance, "jailbreak_prompt", None) or getattr(instance, "query", "")
+    query = getattr(instance, "query", "")
+    if isinstance(prompt_text, str) and "{query}" in prompt_text:
+        try:
+            return prompt_text.format(query=query)
+        except Exception:
+            return prompt_text
+    return str(prompt_text)
+
+
+def _unique_prompts(prompts: List[str], count: int) -> List[str]:
+    deduped: List[str] = []
+    for prompt in prompts:
+        if prompt and prompt not in deduped:
+            deduped.append(prompt)
+        if len(deduped) >= count:
+            break
+    return deduped
+
+
+def _build_whitebox_model():
+    model_path = os.environ.get("EASYJAILBREAK_WHITEBOX_MODEL_PATH", "").strip()
+    tokenizer_path = os.environ.get("EASYJAILBREAK_WHITEBOX_TOKENIZER_PATH", "").strip()
+    model_alias = os.environ.get("EASYJAILBREAK_WHITEBOX_MODEL_NAME", "llama2").strip() or "llama2"
+
+    if not model_path:
+        raise AttackConfigError(
+            "GCG/AutoDAN 需要本地白盒模型，请设置 EASYJAILBREAK_WHITEBOX_MODEL_PATH。",
+            code="MISSING_WHITEBOX_MODEL_CONFIG",
+        )
+
+    from_pretrained = _load_symbol("easyjailbreak.models.huggingface_model", "from_pretrained")
+    kwargs: Dict[str, Any] = {}
+    if tokenizer_path:
+        kwargs["tokenizer_name_or_path"] = tokenizer_path
+    return from_pretrained(model_path, model_name=model_alias, **kwargs)
+
+
+def _ensure_autodan_nltk_resources() -> None:
+    import nltk
+
+    required = {
+        "tokenizers/punkt": "punkt",
+        "corpora/stopwords": "stopwords",
+        "corpora/wordnet": "wordnet",
+    }
+    missing = []
+    for resource_path, resource_name in required.items():
+        try:
+            nltk.data.find(resource_path)
+        except LookupError:
+            missing.append(resource_name)
+    if missing:
+        raise AttackConfigError(
+            "AutoDAN 缺少 NLTK 资源，请先执行: "
+            + " && ".join([f"python -m nltk.downloader {item}" for item in missing]),
+            code="AUTODAN_NLTK_RESOURCE_MISSING",
+        )
+
+
+def _run_real_pair(seed_prompt: str, count: int, api_key: Optional[str], model_name: Optional[str], api_base: Optional[str]) -> List[str]:
+    attacker_cls = _load_attacker_class("PAIR")
+    prompts: List[str] = []
+
+    for _ in range(count):
+        dataset = _build_dataset(seed_prompt, 1)
+        instance = dataset[0]
+        attack_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=attack_model,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+            n_streams=int(os.environ.get("EASYJAILBREAK_PAIR_STREAMS", "1")),
+            n_iterations=int(os.environ.get("EASYJAILBREAK_PAIR_ITERATIONS", "2")),
+            max_n_attack_attempts=int(os.environ.get("EASYJAILBREAK_PAIR_MAX_ATTEMPTS", "3")),
+        )
+        attacked_instance = attacker.single_attack(instance)
+        prompts.append(_extract_prompt_text(attacked_instance))
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_tap(seed_prompt: str, count: int, api_key: Optional[str], model_name: Optional[str], api_base: Optional[str]) -> List[str]:
+    attacker_cls = _load_attacker_class("TAP")
+    prompts: List[str] = []
+
+    for _ in range(count):
+        dataset = _build_dataset(seed_prompt, 1)
+        instance = dataset[0]
+        attack_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=attack_model,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+            tree_width=int(os.environ.get("EASYJAILBREAK_TAP_TREE_WIDTH", "4")),
+            tree_depth=int(os.environ.get("EASYJAILBREAK_TAP_TREE_DEPTH", "2")),
+            root_num=int(os.environ.get("EASYJAILBREAK_TAP_ROOT_NUM", "1")),
+            branching_factor=int(os.environ.get("EASYJAILBREAK_TAP_BRANCHING_FACTOR", "2")),
+            max_n_attack_attempts=int(os.environ.get("EASYJAILBREAK_TAP_MAX_ATTEMPTS", "3")),
+        )
+        attacked_dataset = attacker.single_attack(instance)
+        if len(attacked_dataset) > 0:
+            prompts.append(_extract_prompt_text(attacked_dataset[0]))
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_gcg(seed_prompt: str, count: int) -> List[str]:
+    attacker_cls = _load_attacker_class("GCG")
+    prompts: List[str] = []
+
+    for _ in range(count):
+        dataset = _build_dataset(seed_prompt, 1)
+        attack_model = _build_whitebox_model()
+        target_model = _build_whitebox_model()
+
+        attacker = attacker_cls(
+            attack_model=attack_model,
+            target_model=target_model,
+            jailbreak_datasets=dataset,
+            jailbreak_prompt_length=int(os.environ.get("EASYJAILBREAK_GCG_PROMPT_LENGTH", "20")),
+            num_turb_sample=int(os.environ.get("EASYJAILBREAK_GCG_NUM_TURB_SAMPLE", "128")),
+            top_k=int(os.environ.get("EASYJAILBREAK_GCG_TOP_K", "64")),
+            max_num_iter=int(os.environ.get("EASYJAILBREAK_GCG_MAX_ITER", "30")),
+        )
+        attacker.attack()
+        for item in attacker.jailbreak_datasets:
+            prompts.append(_extract_prompt_text(item))
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_autodan(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    _ensure_autodan_nltk_resources()
+    attacker_cls = _load_attacker_class("AutoDAN")
+    prompts: List[str] = []
+
+    batch_size = int(os.environ.get("EASYJAILBREAK_AUTODAN_BATCH_SIZE", "8"))
+    if batch_size % 2 != 0:
+        batch_size += 1
+
+    for _ in range(count):
+        dataset = _build_dataset(seed_prompt, 1)
+        attack_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        target_model = _build_whitebox_model()
+
+        attacker = attacker_cls(
+            attack_model=attack_model,
+            target_model=target_model,
+            jailbreak_datasets=dataset,
+            model_name=os.environ.get("EASYJAILBREAK_AUTODAN_MODEL_NAME", "llama2"),
+            device=os.environ.get("EASYJAILBREAK_DEVICE", "cpu"),
+            num_steps=int(os.environ.get("EASYJAILBREAK_AUTODAN_NUM_STEPS", "12")),
+            sentence_level_steps=int(os.environ.get("EASYJAILBREAK_AUTODAN_SENTENCE_STEPS", "2")),
+            batch_size=batch_size,
+            low_memory=int(os.environ.get("EASYJAILBREAK_AUTODAN_LOW_MEMORY", "1")),
+        )
+
+        instance = dataset[0]
+        attacked_dataset = attacker.single_attack(instance)
+        if len(attacked_dataset) > 0:
+            prompts.append(_extract_prompt_text(attacked_dataset[0]))
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_attacker(
+    method: str,
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    if method == "PAIR":
+        return _run_real_pair(seed_prompt, count, api_key, model_name, api_base)
+    if method == "TAP":
+        return _run_real_tap(seed_prompt, count, api_key, model_name, api_base)
+    if method == "GCG":
+        return _run_real_gcg(seed_prompt, count)
+    if method == "AutoDAN":
+        return _run_real_autodan(seed_prompt, count, api_key, model_name, api_base)
+    raise AttackConfigError(f"方法 {method} 未配置真实执行器。", code="REAL_ATTACKER_NOT_IMPLEMENTED")
+
+
 def _dependency_error_result(seed_prompt: str, method: str, reason: str) -> Dict[str, Any]:
     return {
         "success": False,
@@ -260,47 +558,112 @@ async def generate_adversarial_prompts(
 
     # 对于简单方法，直接返回变异结果
     if method in BASIC_ATTACK_METHODS:
-        variations = simple_mutate_prompt(seed_prompt, method)
-        # 限制返回数量
-        variations = variations[:count]
-
+        variations = simple_mutate_prompt(seed_prompt, method)[:count]
         return {
             "success": True,
             "method": method,
             "seed_prompt": seed_prompt,
             "generated_count": len(variations),
+            "generation_mode": "local_template",
             "prompts": [
-                {
-                    "id": i,
-                    "prompt": p,
-                    "technique": method,
-                }
+                {"id": i, "prompt": p, "technique": method}
                 for i, p in enumerate(variations)
             ],
             "note": "使用本地变异模板生成",
         }
 
-    # 对于 EasyJailbreak 方法，尝试使用真实的 mutation
+    if method in REAL_ATTACK_METHODS:
+        dep = check_easyjailbreak_dependency(method=method)
+        if not dep["available"]:
+            return _dependency_error_result(seed_prompt, method, dep["reason"])
+
+        try:
+            prompts = _run_real_attacker(
+                method=method,
+                seed_prompt=seed_prompt,
+                count=count,
+                api_key=api_key,
+                model_name=model_name,
+                api_base=api_base,
+            )
+            if not prompts:
+                return {
+                    "success": False,
+                    "method": method,
+                    "seed_prompt": seed_prompt,
+                    "generated_count": 0,
+                    "prompts": [],
+                    "error_code": "REAL_ATTACK_EMPTY_RESULT",
+                    "error": f"真实攻击方法 {method} 未返回有效提示词。",
+                    "note": "请检查模型配置、配额和方法参数。",
+                }
+
+            return {
+                "success": True,
+                "method": method,
+                "seed_prompt": seed_prompt,
+                "generated_count": len(prompts),
+                "generation_mode": "real_attacker",
+                "prompts": [
+                    {
+                        "id": i,
+                        "prompt": prompt_text,
+                        "technique": f"{method}_EasyJailbreakReal",
+                    }
+                    for i, prompt_text in enumerate(prompts)
+                ],
+                "note": f"✅ 使用 EasyJailbreak {method} attacker 主流程真实生成",
+            }
+        except AttackConfigError as exc:
+            return {
+                "success": False,
+                "method": method,
+                "seed_prompt": seed_prompt,
+                "generated_count": 0,
+                "prompts": [],
+                "error_code": exc.code,
+                "error": str(exc),
+                "note": f"⚠️ {method} 真实算法配置不完整",
+            }
+        except Exception as exc:
+            logging.exception("Real attacker failed for method=%s", method)
+            return {
+                "success": False,
+                "method": method,
+                "seed_prompt": seed_prompt,
+                "generated_count": 0,
+                "prompts": [],
+                "error_code": "REAL_ATTACK_EXECUTION_FAILED",
+                "error": f"真实攻击执行失败: {exc}",
+                "note": f"⚠️ {method} 未回退到模拟模板，请先修复真实执行链路",
+            }
+
+    # 其余方法保留 mutation 或模拟实现
     if method in ATTACK_METHODS:
         dep = check_easyjailbreak_dependency()
         if not dep["available"]:
             return _dependency_error_result(seed_prompt, method, dep["reason"])
 
         try:
-            # 尝试使用 EasyJailbreak 的 mutation
             from easyjailbreak.datasets import JailbreakDataset, Instance
             from easyjailbreak.mutation.rule import (
-                Base64, Rot13, Leetspeak, Disemvowel,
-                Base64_input_only, Base64_raw, Artificial,
-                AsciiExpert, CaesarExpert, MorseExpert,
-                Inception, Combination_1, Combination_2, Combination_3
+                Artificial,
+                AsciiExpert,
+                Base64,
+                Base64_raw,
+                CaesarExpert,
+                Combination_1,
+                Combination_2,
+                Combination_3,
+                Disemvowel,
+                Inception,
+                Leetspeak,
+                MorseExpert,
+                Rot13,
             )
 
-            # 创建数据集
             instance = Instance(query=seed_prompt)
             dataset = JailbreakDataset([instance])
-
-            # 根据方法选择 mutation
             mutations = []
             note_suffix = ""
 
@@ -308,26 +671,18 @@ async def generate_adversarial_prompts(
                 mutations = [Base64(), Rot13(), Leetspeak(), AsciiExpert(), CaesarExpert(), MorseExpert()]
                 note_suffix = "（Base64、ROT13、Leetspeak、ASCII、Caesar、Morse）"
             elif method == "JailBroken":
-                mutations = [Artificial(), Base64(), Leetspeak(), Disemvowel(), Rot13(),
-                           Combination_1(), Combination_2(), Combination_3()]
-                note_suffix = "（29种越狱技术）"
+                mutations = [Artificial(), Base64(), Leetspeak(), Disemvowel(), Rot13(), Combination_1(), Combination_2(), Combination_3()]
+                note_suffix = "（规则变异近似）"
             elif method == "DeepInception":
                 mutations = [Inception(), Artificial(), Combination_1()]
-                note_suffix = "（深度植入攻击）"
+                note_suffix = "（深度植入规则变异）"
             elif method == "ICA":
                 mutations = [Combination_1(), Combination_2(), Combination_3()]
-                note_suffix = "（上下文组合攻击）"
-            elif method == "AutoDAN":
-                mutations = [Artificial(), Combination_1(), Combination_2(), Combination_3()]
-                note_suffix = "（自动对抗生成）"
+                note_suffix = "（上下文组合规则）"
             elif method == "CodeChameleon":
                 mutations = [Base64(), AsciiExpert(), Leetspeak(), Base64_raw()]
-                note_suffix = "（代码伪装编码）"
-            elif method == "GCG":
-                mutations = [Combination_1(), Combination_2(), Combination_3(), Artificial()]
-                note_suffix = "（组合对抗攻击，真实GCG需要GPU梯度计算）"
-            elif method in ["PAIR", "TAP", "GPTFuzz", "ReNeLLM"]:
-                # 这些方法需要模型
+                note_suffix = "（代码伪装编码规则）"
+            elif method in ["GPTFuzz", "ReNeLLM"]:
                 if not api_key or not model_name:
                     return {
                         "success": False,
@@ -337,57 +692,42 @@ async def generate_adversarial_prompts(
                         "prompts": [],
                         "note": f"⚠️ {method} 需要攻击模型配置",
                     }
-
-                # 创建模型实例
                 from easyjailbreak.models.openai_model import OpenaiModel
-                attack_model = OpenaiModel(
-                    model_name=model_name,
-                    api_keys=api_key,
-                    base_url=api_base
-                )
+                from easyjailbreak.mutation.rule import Auto_obfuscation, Auto_payload_splitting
 
-                # 使用需要模型的 mutation
-                from easyjailbreak.mutation.rule import Auto_payload_splitting, Auto_obfuscation
+                attack_model = OpenaiModel(model_name=model_name, api_keys=api_key, base_url=api_base)
                 mutations = [
-                    Auto_payload_splitting(attack_model, attr_name='query'),
-                    Auto_obfuscation(attack_model, attr_name='query')
+                    Auto_payload_splitting(attack_model, attr_name="query"),
+                    Auto_obfuscation(attack_model, attr_name="query"),
                 ]
                 note_suffix = f"（使用 {model_name} 作为攻击模型）"
             elif method == "MultiLingual":
-                # 多语言需要翻译
                 if not api_key or not model_name:
                     return generate_mock_result(seed_prompt, method, count)
-
                 from easyjailbreak.models.openai_model import OpenaiModel
                 from easyjailbreak.mutation.rule import Translate
-                attack_model = OpenaiModel(
-                    model_name=model_name,
-                    api_keys=api_key,
-                    base_url=api_base
-                )
-                mutations = [Translate(attack_model, attr_name='query')]
+
+                attack_model = OpenaiModel(model_name=model_name, api_keys=api_key, base_url=api_base)
+                mutations = [Translate(attack_model, attr_name="query")]
                 note_suffix = f"（使用 {model_name} 进行翻译）"
             else:
-                # 其他方法用模拟
                 return generate_mock_result(seed_prompt, method, count)
 
-            # 应用 mutation
-            results = []
+            results: List[str] = []
             for mutation in mutations[:count]:
                 try:
                     mutated_dataset = mutation(dataset)
                     for item in mutated_dataset:
-                        if hasattr(item, 'jailbreak_prompt'):
-                            prompt_text = item.jailbreak_prompt.format(query=item.query) if '{query}' in item.jailbreak_prompt else item.jailbreak_prompt
+                        if hasattr(item, "jailbreak_prompt"):
+                            prompt_text = item.jailbreak_prompt.format(query=item.query) if "{query}" in item.jailbreak_prompt else item.jailbreak_prompt
                         else:
                             prompt_text = item.query
                         results.append(prompt_text)
                         if len(results) >= count:
                             break
-                except Exception as e:
-                    logging.warning(f"Mutation failed: {e}")
+                except Exception as exc:
+                    logging.warning("Mutation failed for method=%s: %s", method, exc)
                     continue
-
                 if len(results) >= count:
                     break
 
@@ -397,23 +737,16 @@ async def generate_adversarial_prompts(
                     "method": method,
                     "seed_prompt": seed_prompt,
                     "generated_count": len(results),
+                    "generation_mode": "mutation",
                     "prompts": [
-                        {
-                            "id": i,
-                            "prompt": p,
-                            "technique": f"{method}_EasyJailbreak",
-                        }
+                        {"id": i, "prompt": p, "technique": f"{method}_EasyJailbreakMutation"}
                         for i, p in enumerate(results)
                     ],
-                    "note": f"✅ 使用 EasyJailbreak {method} 真实生成 {note_suffix}",
+                    "note": f"✅ 使用 EasyJailbreak 规则变异生成 {note_suffix}",
                 }
-            else:
-                # 如果没有结果，回退到模拟
-                return generate_mock_result(seed_prompt, method, count)
-
-        except Exception as e:
-            # 如果 EasyJailbreak 失败，回退到本地模拟模板
-            logging.warning(f"EasyJailbreak failed: {e}")
+            return generate_mock_result(seed_prompt, method, count)
+        except Exception as exc:
+            logging.warning("EasyJailbreak mutation path failed: %s", exc)
             return generate_mock_result(seed_prompt, method, count)
 
     return {
@@ -433,6 +766,7 @@ def generate_mock_result(seed_prompt: str, method: str, count: int) -> Dict[str,
         "method": method,
         "seed_prompt": seed_prompt,
         "generated_count": len(mock_prompts),
+        "generation_mode": "simulated",
         "prompts": [
             {
                 "id": i,

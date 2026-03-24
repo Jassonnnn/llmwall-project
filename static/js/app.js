@@ -72,6 +72,7 @@ const app = createApp({
     const attackTestResults = ref([]);
     const quickAttackMethod = ref('');
     const generationNote = ref(''); // 保存生成时的提示信息
+    const generationMode = ref('');
     const attackMethodsNotice = ref('');
 
     const selectedAttackMethod = computed(() => {
@@ -102,6 +103,14 @@ const app = createApp({
       if (!description) return '';
       const parts = description.split(' - ');
       return parts.length > 1 ? parts[1] : description;
+    };
+
+    const getGenerationModeLabel = (mode) => {
+      if (mode === 'real_attacker') return '真实算法';
+      if (mode === 'mutation') return '规则变异';
+      if (mode === 'simulated') return '模拟模板';
+      if (mode === 'local_template') return '本地模板';
+      return '未知';
     };
 
     const autoFillLocal = () => {
@@ -292,10 +301,12 @@ const app = createApp({
         const data = await res.json();
         if (data.success) {
           generatedPrompts.value = data.prompts;
+          generationMode.value = data.generation_mode || '';
           generationNote.value = data.note || ''; // 保存提示信息
           showToast(`成功生成 ${data.generated_count} 个对抗性提示词！`);
         } else {
           showToast(data.error || '生成失败');
+          generationMode.value = data.generation_mode || '';
           generationNote.value = data.note || '';
         }
       } catch (e) {
@@ -339,6 +350,8 @@ const app = createApp({
     const clearAttackResults = () => {
       generatedPrompts.value = [];
       attackTestResults.value = [];
+      generationMode.value = '';
+      generationNote.value = '';
       attackConfig.seedPrompt = '';
       attackConfig.method = '';
       quickAttackMethod.value = '';
@@ -669,8 +682,9 @@ const app = createApp({
       getDatasetCategoryCount, startBatchEval,
       // 攻击生成
       attackMethods, attackConfig, attackGenerating, attackTesting,
-      generatedPrompts, attackTestResults, quickAttackMethod, generationNote, attackMethodsNotice,
+      generatedPrompts, attackTestResults, quickAttackMethod, generationNote, generationMode, attackMethodsNotice,
       selectedAttackMethod, canGenerateAttacks, attackSuccessCount, attackFailCount,
+      getGenerationModeLabel,
       generateAttacks, testGeneratedAttacks, clearAttackResults,
       usePromptForTest, copyPrompt, applyQuickMethod
     };

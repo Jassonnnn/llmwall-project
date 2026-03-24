@@ -102,6 +102,7 @@ class AttackGenResponse(BaseModel):
     seed_prompt: str
     generated_count: int
     prompts: List[Dict[str, Any]]
+    generation_mode: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[str] = None
     note: Optional[str] = None

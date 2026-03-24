@@ -55,6 +55,7 @@ async def generate_attacks(req: AttackGenRequest):
             seed_prompt=req.seed_prompt,
             generated_count=0,
             prompts=[],
+            generation_mode=result.get("generation_mode"),
             error=result.get("error", "生成失败"),
             error_code=result.get("error_code"),
             note=result.get("note"),
@@ -66,6 +67,7 @@ async def generate_attacks(req: AttackGenRequest):
         seed_prompt=result["seed_prompt"],
         generated_count=result["generated_count"],
         prompts=result["prompts"],
+        generation_mode=result.get("generation_mode"),
         error_code=result.get("error_code"),
         note=result.get("note"),
     )

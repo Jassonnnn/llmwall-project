@@ -65,13 +65,13 @@ jb_demo/
 ### 1. 激活虚拟环境
 
 ```bash
-conda activate opa_acl
+conda activate jb_demo
 ```
 
 ### 2. 进入项目目录
 
 ```bash
-cd /data/ljc/llmwall-project/jb_demo
+cd /data/ljc/jb_demo
 ```
 
 ### 3. 启动服务
@@ -140,6 +140,25 @@ conda run -n jb_demo python scripts/build_attack_category_index.py \
   --dataset-id harmbench_text_test \
   --limit 20 \
   --api-key <YOUR_API_KEY>
+```
+
+## 真实攻击方法（PAIR / TAP / GCG / AutoDAN）
+
+- `PAIR`、`TAP`：已接入 EasyJailbreak attacker 主流程（需要 API Key + Model ID）
+- `GCG`、`AutoDAN`：已接入真实 attacker，但依赖本地白盒模型
+
+白盒模型最小配置（用于 `GCG` / `AutoDAN`）：
+
+```bash
+export EASYJAILBREAK_WHITEBOX_MODEL_PATH=/path/to/your/hf-model
+export EASYJAILBREAK_WHITEBOX_TOKENIZER_PATH=/path/to/your/hf-tokenizer   # 可选
+export EASYJAILBREAK_WHITEBOX_MODEL_NAME=llama2
+```
+
+AutoDAN 还需要 NLTK 资源：
+
+```bash
+python -m nltk.downloader punkt stopwords wordnet
 ```
 
 ## 依赖项
