@@ -32,8 +32,14 @@ const app = createApp({
 
     // === 批量评估状态 ===
     const datasets = ref([]);
+    const attackCategories = ref([
+      { id: 'mixed_all', name: '混合（全部）', description: '不筛选攻击类型' }
+    ]);
+    const categoryIndexReady = ref(false);
+    const categoryIndexError = ref('');
     const batchConfig = reactive({
       datasetId: '',
+      attackCategory: 'mixed_all',
       target: 'api',
       evaluator: 'keyword',
       sampleCount: 10
@@ -170,6 +176,18 @@ const app = createApp({
       return ds ? ds.name : id;
     };
 
+    const getAttackCategoryName = (id) => {
+      const category = attackCategories.value.find(c => c.id === id);
+      return category ? category.name : id;
+    };
+
+    const getDatasetCategoryCount = (datasetId, categoryId) => {
+      const ds = datasets.value.find(d => d.id === datasetId);
+      if (!ds || !ds.category_counts) return null;
+      if (!(categoryId in ds.category_counts)) return null;
+      return ds.category_counts[categoryId];
+    };
+
     // === API 调用 ===
     const fetchSettings = async () => {
       try {
@@ -201,7 +219,26 @@ const app = createApp({
     const fetchDatasets = async () => {
       try {
         const res = await fetch('/api/datasets');
-        datasets.value = await res.json();
+        const payload = await res.json();
+
+        if (Array.isArray(payload)) {
+          // 兼容旧版后端返回
+          datasets.value = payload;
+          categoryIndexReady.value = false;
+          categoryIndexError.value = '';
+          attackCategories.value = [
+            { id: 'mixed_all', name: '混合（全部）', description: '不筛选攻击类型' }
+          ];
+        } else {
+          datasets.value = payload.datasets || [];
+          attackCategories.value = payload.attack_categories || attackCategories.value;
+          categoryIndexReady.value = !!payload.index_ready;
+          categoryIndexError.value = payload.index_error || '';
+        }
+
+        if (!attackCategories.value.some(c => c.id === batchConfig.attackCategory)) {
+          batchConfig.attackCategory = 'mixed_all';
+        }
       } catch (e) {
         console.error("Datasets load failed", e);
       }
@@ -521,6 +558,7 @@ const app = createApp({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             dataset_id: batchConfig.datasetId,
+            attack_category: batchConfig.attackCategory,
             target: batchConfig.target,
             evaluator: batchConfig.evaluator,
             sample_count: batchConfig.sampleCount
@@ -559,7 +597,11 @@ const app = createApp({
             batchStatus.completed = data.total;
             showToast("批量评估完成！");
           } else if (data.type === 'error') {
-            showToast("评估出错: " + data.message);
+            if (data.code === 'CATEGORY_INDEX_MISSING') {
+              showToast("分类索引未构建，请先运行离线标注脚本");
+            } else {
+              showToast("评估出错: " + data.message);
+            }
           }
         };
 
@@ -622,7 +664,9 @@ const app = createApp({
       // 对话模式
       prompt, lastPrompt, loading, config, results, hasAnyResult, gridClass, shouldRun, runTests,
       // 批量评估
-      datasets, batchConfig, batchStatus, batchResults, getDatasetName, startBatchEval,
+      datasets, attackCategories, categoryIndexReady, categoryIndexError,
+      batchConfig, batchStatus, batchResults, getDatasetName, getAttackCategoryName,
+      getDatasetCategoryCount, startBatchEval,
       // 攻击生成
       attackMethods, attackConfig, attackGenerating, attackTesting,
       generatedPrompts, attackTestResults, quickAttackMethod, generationNote, attackMethodsNotice,

@@ -24,6 +24,47 @@ BATCH_TASKS: Dict[str, Dict[str, Any]] = {}
 
 # --- 数据集配置 ---
 DATASETS_PATH = Path(__file__).parent.parent / "datasets"
+DATASET_INDEX_DIR = DATASETS_PATH / "index"
+ATTACK_CATEGORY_INDEX_VERSION = "v1"
+ATTACK_CATEGORY_INDEX_FILE = DATASET_INDEX_DIR / f"attack_category_index_{ATTACK_CATEGORY_INDEX_VERSION}.jsonl"
+
+ATTACK_CATEGORIES = [
+    {
+        "id": "mixed_all",
+        "name": "混合（全部）",
+        "description": "不筛选攻击类型，使用该数据集全部样本",
+    },
+    {
+        "id": "direct_request",
+        "name": "直接请求",
+        "description": "无明显越狱技巧，直接提出有害请求",
+    },
+    {
+        "id": "roleplay_persona",
+        "name": "角色扮演",
+        "description": "通过角色设定、DAN、人设切换等绕过约束",
+    },
+    {
+        "id": "obfuscation_encoding",
+        "name": "编码混淆",
+        "description": "Base64/ROT13/拆分字符/同义替换等混淆方式",
+    },
+    {
+        "id": "contextual_injection",
+        "name": "上下文注入",
+        "description": "多轮上下文、伪系统指令、样例注入等策略",
+    },
+    {
+        "id": "multilingual_transformation",
+        "name": "多语言绕过",
+        "description": "通过翻译、夹杂外语等方式规避安全规则",
+    },
+    {
+        "id": "compositional_hybrid",
+        "name": "组合攻击",
+        "description": "多种越狱技巧叠加形成复合攻击模式",
+    },
+]
 
 AVAILABLE_DATASETS = {
     "harmbench_text_all": {

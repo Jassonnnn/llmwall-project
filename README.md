@@ -95,7 +95,7 @@ python main.py
 | `/` | GET | 主页面 |
 | `/api/config` | GET | 获取当前模型配置 |
 | `/api/config` | POST | 更新模型配置 |
-| `/api/datasets` | GET | 获取可用数据集列表 |
+| `/api/datasets` | GET | 获取可用数据集列表与攻击分类统计 |
 | `/api/test_scenario` | POST | 单条指令测试 |
 | `/api/batch_evaluate` | POST | 批量评估（SSE 流式返回） |
 
@@ -112,9 +112,35 @@ python main.py
 
 1. 切换到"批量评估"标签页
 2. 选择测试数据集
-3. 设置采样数量（可选）
-4. 选择目标模型和评估方式
-5. 点击"开始评估"，实时查看进度
+3. 选择攻击分类（角色扮演 / 编码混淆 / 上下文注入等，或“混合全部”）
+4. 设置采样数量（可选）
+5. 选择目标模型和评估方式
+6. 点击"开始评估"，实时查看进度
+
+## 攻击分类索引（离线构建）
+
+批量评估中的“攻击分类”依赖 sidecar 索引文件（不修改原始 CSV）。
+
+默认索引路径：
+`datasets/index/attack_category_index_v1.jsonl`
+
+构建命令示例：
+
+```bash
+conda run -n jb_demo python scripts/build_attack_category_index.py \
+  --api-key <YOUR_API_KEY> \
+  --model openrouter/deepseek/deepseek-chat \
+  --max-concurrency 8
+```
+
+调试少量样本：
+
+```bash
+conda run -n jb_demo python scripts/build_attack_category_index.py \
+  --dataset-id harmbench_text_test \
+  --limit 20 \
+  --api-key <YOUR_API_KEY>
+```
 
 ## 依赖项
 

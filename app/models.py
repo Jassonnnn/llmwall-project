@@ -7,6 +7,15 @@ TargetSingle = Literal["api", "local"]
 TargetBatch = Literal["api", "local", "all"]
 EvaluatorSingle = Literal["keyword", "llm_judge"]
 EvaluatorBatch = Literal["keyword", "llm_judge", "all"]
+AttackCategory = Literal[
+    "mixed_all",
+    "direct_request",
+    "roleplay_persona",
+    "obfuscation_encoding",
+    "contextual_injection",
+    "multilingual_transformation",
+    "compositional_hybrid",
+]
 AttackMethod = Literal[
     "basic_jailbreak",
     "encoding",
@@ -58,6 +67,7 @@ class BatchEvalRequest(BaseModel):
     dataset_id: str
     target: TargetBatch
     evaluator: EvaluatorBatch
+    attack_category: AttackCategory = "mixed_all"
     sample_count: Optional[int] = Field(default=None, ge=1)  # None表示全部
 
 

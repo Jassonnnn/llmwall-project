@@ -201,7 +201,7 @@
 
           <!-- 配置面板 -->
           <div class="dashboard-card p-6 mb-6">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
               <!-- 数据集选择 -->
               <div>
                 <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">选择数据集</label>
@@ -209,6 +209,17 @@
                   <option value="" disabled>-- 请选择 --</option>
                   <option v-for="ds in datasets" :key="ds.id" :value="ds.id" :disabled="!ds.available">
                     [[ ds.name ]] ([[ ds.count ]]条)
+                  </option>
+                </select>
+              </div>
+
+              <!-- 攻击分类 -->
+              <div>
+                <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">攻击分类</label>
+                <select v-model="batchConfig.attackCategory" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
+                  <option v-for="cat in attackCategories" :key="cat.id" :value="cat.id"
+                          :disabled="cat.id !== 'mixed_all' && !categoryIndexReady">
+                    [[ cat.name ]]
                   </option>
                 </select>
               </div>
@@ -245,11 +256,23 @@
               </div>
             </div>
 
+            <div v-if="!categoryIndexReady" class="mt-4 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2">
+              <i class="fas fa-exclamation-triangle mr-1"></i>
+              分类索引未构建，当前仅支持“混合（全部）”。
+              <span v-if="categoryIndexError" class="text-orange-600">[[ categoryIndexError ]]</span>
+            </div>
+
             <!-- 开始按钮 -->
             <div class="mt-6 flex items-center justify-between">
               <div class="text-sm text-gray-500">
                 <span v-if="batchConfig.datasetId">
                   已选择: <span class="font-bold text-gray-700">[[ getDatasetName(batchConfig.datasetId) ]]</span>
+                </span>
+                <span v-if="batchConfig.datasetId" class="ml-2">
+                  分类: <span class="font-bold text-gray-700">[[ getAttackCategoryName(batchConfig.attackCategory) ]]</span>
+                  <span v-if="getDatasetCategoryCount(batchConfig.datasetId, batchConfig.attackCategory) !== null">
+                    （[[ getDatasetCategoryCount(batchConfig.datasetId, batchConfig.attackCategory) ]] 条）
+                  </span>
                 </span>
               </div>
               <button @click="startBatchEval"

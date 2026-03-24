@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.models import BatchEvalRequest
-from app.services.dataset import load_dataset, get_dataset_info
+from app.services.dataset import CategoryIndexMissingError, get_dataset_info, load_dataset
 from app.services.evaluator import evaluate_single_prompt
 
 router = APIRouter()
@@ -22,7 +22,7 @@ async def batch_evaluate(req: BatchEvalRequest):
     async def generate():
         try:
             # 加载数据集
-            prompts = load_dataset(req.dataset_id, req.sample_count)
+            prompts = load_dataset(req.dataset_id, req.sample_count, req.attack_category)
             total = len(prompts)
 
             # 确定要运行的组合
@@ -120,8 +120,20 @@ async def batch_evaluate(req: BatchEvalRequest):
             }
             yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
 
+        except CategoryIndexMissingError as e:
+            err_data = {
+                "type": "error",
+                "code": "CATEGORY_INDEX_MISSING",
+                "message": str(e),
+            }
+            yield f"data: {json.dumps(err_data, ensure_ascii=False)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            err_data = {
+                "type": "error",
+                "code": "BATCH_EVAL_FAILED",
+                "message": str(e),
+            }
+            yield f"data: {json.dumps(err_data, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate(),

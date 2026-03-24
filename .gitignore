@@ -35,3 +35,6 @@ EasyJailbreak/
 datasets/*
 !datasets/README.md
 !datasets/load_datasets.py
+!datasets/index/
+datasets/index/*
+!datasets/index/.gitkeep
