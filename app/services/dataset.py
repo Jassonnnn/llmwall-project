@@ -7,6 +7,7 @@ import pandas as pd
 from app.config import (
     ATTACK_CATEGORIES,
     ATTACK_CATEGORY_INDEX_FILE,
+    ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK,
     ATTACK_CATEGORY_INDEX_FALLBACK_FILE,
     ATTACK_CATEGORY_INDEX_FALLBACK_VERSION,
     ATTACK_CATEGORY_INDEX_PREFERRED_VERSION,
@@ -141,6 +142,23 @@ def _resolve_category_index() -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         preferred_error = str(exc)
 
+    if not ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK:
+        return {
+            "ready": False,
+            "index_map": {},
+            "index_version": ATTACK_CATEGORY_INDEX_PREFERRED_VERSION,
+            "index_file": str(ATTACK_CATEGORY_INDEX_FILE),
+            "is_fallback": False,
+            "warning": (
+                f"未启用回退策略，当前要求使用 {ATTACK_CATEGORY_INDEX_PREFERRED_VERSION} 索引。"
+            ),
+            "error": (
+                "分类索引不可用。"
+                f" preferred_error={preferred_error}。"
+                "如需临时回退 v1，请设置 ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK=true。"
+            ),
+        }
+
     try:
         fallback_map = _load_category_index_from_path(
             ATTACK_CATEGORY_INDEX_FALLBACK_FILE, ATTACK_CATEGORY_INDEX_FALLBACK_VERSION
@@ -167,8 +185,8 @@ def _resolve_category_index() -> Dict[str, Any]:
     return {
         "ready": False,
         "index_map": {},
-        "index_version": "",
-        "index_file": "",
+        "index_version": ATTACK_CATEGORY_INDEX_PREFERRED_VERSION,
+        "index_file": str(ATTACK_CATEGORY_INDEX_FILE),
         "is_fallback": False,
         "warning": "",
         "error": (
@@ -317,4 +335,5 @@ def get_dataset_info() -> Dict[str, Any]:
         "index_version": resolved["index_version"] or ATTACK_CATEGORY_INDEX_PREFERRED_VERSION,
         "index_warning": resolved["warning"],
         "index_quality": index_quality,
+        "index_fallback_allowed": ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK,
     }

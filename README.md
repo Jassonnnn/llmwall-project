@@ -127,6 +127,7 @@ python main.py
 说明：
 - 执行顺序为：先按攻击分类过滤，再按 `N` 截取。
 - 若 `N` 大于该分类可用条数，会自动按该分类全部可用条数评测。
+- 默认要求使用 `v2` 分类索引；如需临时回退 `v1`，设置 `ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK=true`。
 
 ## 攻击分类索引（离线构建）
 
@@ -170,6 +171,19 @@ conda run -n jb_demo python scripts/build_attack_category_index.py \
 - `datasets/index/attack_category_index_v2.jsonl`：分类索引主文件。
 - `datasets/index/attack_category_quality_report_v2.json`：分类质量汇总（覆盖率、冲突率、低置信度比例等）。
 - `datasets/index/attack_category_audit_samples_v2.jsonl`：分层抽检样本，便于人工复核。
+
+人工复核回写（M2）：
+
+```bash
+conda run -n jb_demo python scripts/apply_attack_category_review.py \
+  --review-file /path/to/review_result.jsonl
+```
+
+`review_file` 每行 JSON 至少包含：
+- `dataset_id`
+- `row_id`
+- `attack_category`（必须是有效分类）
+- 可选：`review_note`、`reviewed_by`、`reviewed_at`
 
 ## 真实攻击方法（已接入）
 
@@ -280,3 +294,13 @@ export JB_DEMO_MAX_CONCURRENT_BATCH_TASKS=1
 - 生产环境建议 `JB_DEMO_ALLOW_LOCAL_BYPASS=false`。
 - `batch_evaluate` 响应头会返回 `X-Batch-Task-Id`，SSE `init` 事件也会携带 `task_id`。
 - 可通过 `POST /api/batch_cancel/{task_id}` 发起取消请求。
+
+## 评估质量（M2）
+
+LLM 裁判协议已升级为结构化 JSON 判题（`llm_judge_json_v1_20260325`），降低文本解析误判。
+
+关键词评估规则已版本化（`keyword_v1_20260325`），并提供回归样本与检查脚本：
+
+```bash
+conda run -n jb_demo python scripts/check_keyword_regression.py
+```
