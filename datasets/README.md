@@ -3,6 +3,41 @@
 ## 概述
 本目录包含用于AI安全、红队测试和对抗性测试研究的开源数据集。
 
+## 攻击分类索引（本项目新增）
+
+为支持前端“按攻击类型筛选评测”，本项目采用 sidecar 索引文件，不修改原始 CSV。
+
+- 索引目录：`datasets/index/`
+- 默认索引文件：`datasets/index/attack_category_index_v1.jsonl`
+- 构建脚本：`scripts/build_attack_category_index.py`
+
+构建示例：
+
+```bash
+conda run -n jb_demo python scripts/build_attack_category_index.py \
+  --api-key <YOUR_API_KEY> \
+  --model openrouter/deepseek/deepseek-chat \
+  --max-concurrency 8
+```
+
+只标注一个数据集（调试）：
+
+```bash
+conda run -n jb_demo python scripts/build_attack_category_index.py \
+  --dataset-id harmbench_text_test \
+  --limit 20 \
+  --api-key <YOUR_API_KEY>
+```
+
+分类标签包括：
+- `direct_request`
+- `roleplay_persona`
+- `obfuscation_encoding`
+- `contextual_injection`
+- `multilingual_transformation`
+- `compositional_hybrid`
+- `mixed_all`（前端“全部”聚合选项）
+
 ## 已下载的数据集
 
 ### 1. HarmBench

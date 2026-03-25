@@ -149,12 +149,51 @@ conda run -n jb_demo python scripts/build_attack_category_index.py \
 - `Cipher`、`JailBroken`、`DeepInception`、`MultiLingual`、`CodeChameleon`
 - `GCG`、`AutoDAN`（依赖本地白盒模型）
 
+## 攻击方法现状（2026-03）
+
+- 总方法数：`17`
+- EasyJailbreak 方法：`12`（全部接入真实 attacker 主流程）
+- Baseline 模板方法：`5`（用于对照，不属于论文算法复现）
+
+Baseline 模板方法列表：
+- `basic_jailbreak`
+- `encoding`
+- `translation`
+- `roleplay`
+- `hypothetical`
+
+说明：
+- 所有 EasyJailbreak 方法都会优先走真实链路。
+- 配置不满足时返回结构化错误（例如 `MISSING_ATTACK_MODEL_CONFIG`、`MISSING_WHITEBOX_MODEL_CONFIG`），不会静默伪装成“模拟成功”。
+- 生成结果会返回 `generation_mode`：`real_attacker` / `mutation` / `simulated` / `local_template`。
+
 白盒模型最小配置（用于 `GCG` / `AutoDAN`）：
 
 ```bash
 export EASYJAILBREAK_WHITEBOX_MODEL_PATH=/path/to/your/hf-model
 export EASYJAILBREAK_WHITEBOX_TOKENIZER_PATH=/path/to/your/hf-tokenizer   # 可选
 export EASYJAILBREAK_WHITEBOX_MODEL_NAME=llama2
+```
+
+常用可调参数（可选）：
+
+```bash
+# PAIR
+export EASYJAILBREAK_PAIR_STREAMS=1
+export EASYJAILBREAK_PAIR_ITERATIONS=2
+
+# TAP
+export EASYJAILBREAK_TAP_TREE_WIDTH=4
+export EASYJAILBREAK_TAP_TREE_DEPTH=2
+
+# GPTFuzz / ReNeLLM / ICA
+export EASYJAILBREAK_GPTFUZZ_ENERGY=1
+export EASYJAILBREAK_RENELLM_EVO_MAX=3
+export EASYJAILBREAK_ICA_PROMPT_NUM=5
+
+# GCG / AutoDAN
+export EASYJAILBREAK_GCG_MAX_ITER=30
+export EASYJAILBREAK_AUTODAN_NUM_STEPS=12
 ```
 
 AutoDAN 还需要 NLTK 资源：
