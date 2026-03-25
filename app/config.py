@@ -46,6 +46,11 @@ JB_DEMO_SERVICE_TOKEN = os.getenv("JB_DEMO_SERVICE_TOKEN", "").strip()
 JB_DEMO_REQUIRE_AUTH = _env_bool("JB_DEMO_REQUIRE_AUTH", True)
 JB_DEMO_ALLOW_LOCAL_BYPASS = _env_bool("JB_DEMO_ALLOW_LOCAL_BYPASS", True)
 JB_DEMO_MAX_CONCURRENT_BATCH_TASKS = _env_int("JB_DEMO_MAX_CONCURRENT_BATCH_TASKS", 1, minimum=1)
+RUNTIME_DIR = Path(__file__).parent.parent / "runtime"
+JB_DEMO_EVAL_DB_PATH = Path(
+    os.getenv("JB_DEMO_EVAL_DB_PATH", str(RUNTIME_DIR / "evaluation_tasks.db"))
+)
+JB_DEMO_EVAL_RESULTS_PAGE_LIMIT = _env_int("JB_DEMO_EVAL_RESULTS_PAGE_LIMIT", 200, minimum=1)
 
 # --- 数据集配置 ---
 DATASETS_PATH = Path(__file__).parent.parent / "datasets"

@@ -2,19 +2,21 @@
 
 ## 1. 汇报摘要
 
-本阶段围绕“可用、可信、可接入”完成了 10 次核心提交，覆盖：
+本阶段围绕“可用、可信、可接入”完成了 11 次核心提交，覆盖：
 
 - `EasyJailbreak` 真实攻击方法接入（12/12 完成）。
 - 批量评估能力升级（攻击分类优先 + 固定条数评估）。
 - 攻击分类索引升级到 `v2`（含质量报告、抽检样本、前端告警）。
 - 第一周安全硬化（鉴权、统一错误协议、任务可取消、环境稳定性修复）。
 - M2 质量治理（评估器版本化、关键词规则版本化、索引严格策略、人工复核回写工具）。
+- M3 接口化推进（统一异步任务接口 + SQLite 结果持久化 + 联调通过）。
 
 当前状态：
 
 - 分支：`jb_demo-migration`
-- 提交数（本阶段）：`10`
-- 最新提交：`（本次提交：M2 质量治理）`
+- 提交数（本阶段）：`11`
+- 最新提交：`（本次提交：M3 统一接口与联调）`
+- 最新进展：`jb_demo` 虚拟环境依赖链已校准，统一接口已完成本地联调
 
 ---
 
@@ -52,6 +54,10 @@
 10. `（本次提交）`（2026-03-25）
    - 主题：M2 质量治理：
      `llm_judge` 结构化协议、关键词规则版本化与回归校验、索引严格策略与人工复核回写。
+
+11. `（本次提交）`（2026-03-25）
+   - 主题：M3 统一接口与联调：
+     新增统一任务 API（创建/查询/分页结果/取消）、SQLite 持久化、环境依赖链校准、联调验证通过。
 
 ---
 
@@ -95,12 +101,36 @@
   - 强制建议 `PYTHONNOUSERSITE=1`
   - 增加 `requirements.lock.txt` 与 `scripts/doctor_env.py`
 
+### 3.6 统一任务接口（M3 已落地）
+
+- 新增统一任务入口：`POST /api/evaluations`
+- 新增任务状态查询：`GET /api/evaluations/{task_id}`
+- 新增分页结果查询：`GET /api/evaluations/{task_id}/results`
+- 新增统一取消接口：`POST /api/evaluations/{task_id}/cancel`
+- 任务与结果持久化到 SQLite：默认 `runtime/evaluation_tasks.db`
+- 支持 `red_team` 与 `guardrail` 双 phase 结果分离，便于前端统一呈现
+
+### 3.7 联调与环境校准结果
+
+- `jb_demo` 环境执行 `requirements.lock.txt` 校准后，无版本冲突。
+- `scripts/doctor_env.py` 检查通过（`PYTHONNOUSERSITE=1`，依赖版本来自 `/data/jb_demo`）。
+- 新接口联调通过：
+  - `POST /api/evaluations` 创建任务
+  - `GET /api/evaluations/{task_id}` 查询状态
+  - `GET /api/evaluations/{task_id}/results` 分页取结果
+  - `POST /api/evaluations/{task_id}/cancel` 取消任务
+- 兼容回归通过：`/api/batch_evaluate` SSE 仍可正常返回 `init/progress` 事件
+
 ---
 
 ## 4. 对外接口变化（汇报重点）
 
 - 新增接口：`POST /api/batch_cancel/{task_id}`。
 - `POST /api/batch_evaluate`：返回 `task_id`（header + SSE init event）。
+- `POST /api/evaluations`：创建统一异步任务（红队 + 可选护栏）。
+- `GET /api/evaluations/{task_id}`：查询任务生命周期状态。
+- `GET /api/evaluations/{task_id}/results`：分页获取评估结果。
+- `POST /api/evaluations/{task_id}/cancel`：取消统一评估任务。
 - 关键接口已受鉴权保护（config/test/attack/batch）。
 - 错误协议统一，便于外部前端和网关稳定接入。
 - `/api/datasets` 增加索引治理信号：`index_fallback_allowed`。
@@ -109,9 +139,8 @@
 
 ## 5. 当前风险与待办
 
-1. 目前本地提交已领先远端，需统一 push 节奏。
-2. `SwordHolder` 侧已做对接改动但尚未统一收口提交。
-3. 建议下阶段：
+1. `SwordHolder` 侧已做对接改动但尚未统一收口提交。
+2. 建议下阶段：
    - 完成 `SwordHolder -> jb_demo` 端到端联调并提交。
    - 增补评估协议契约测试（含 `llm_judge` JSON 协议校验）。
    - 引入人工复核抽检闭环（抽样 -> 回写 -> 重建质量报告）。

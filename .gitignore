@@ -27,6 +27,8 @@ env/
 *.pid
 .env
 .env.*
+runtime/*
+!runtime/.gitkeep
 
 # Large vendored dependency (install via pip when needed)
 EasyJailbreak/

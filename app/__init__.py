@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.errors import AppError, error_payload
 from app.routes import register_routes
+from app.services.evaluation_tasks import init_evaluation_store
 
 # 创建 FastAPI 应用实例
 app = FastAPI(title="安全评估平台")
@@ -89,6 +90,11 @@ async def handle_unexpected_exception(_: Request, exc: Exception):
         status_code=500,
         content=error_payload(code="INTERNAL_ERROR", message="服务内部异常。"),
     )
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    await init_evaluation_store()
 
 
 # 根路由 - 返回主页

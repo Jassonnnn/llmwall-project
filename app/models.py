@@ -71,6 +71,18 @@ class BatchEvalRequest(BaseModel):
     sample_count: Optional[int] = Field(default=None, ge=1)  # None表示全部
 
 
+class EvaluationCreateRequest(BaseModel):
+    dataset_id: str
+    target: TargetBatch = "api"
+    evaluator: EvaluatorBatch = "keyword"
+    attack_category: AttackCategory = "mixed_all"
+    sample_count: Optional[int] = Field(default=None, ge=1)
+    include_guardrail: bool = False
+    guardrail_target: Optional[TargetSingle] = None
+    guardrail_evaluator: Optional[EvaluatorSingle] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 # 攻击生成相关模型
 class AttackGenRequest(BaseModel):
     seed_prompt: str

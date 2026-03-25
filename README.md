@@ -105,6 +105,10 @@ python main.py
 | `/api/test_scenario` | POST | 单条指令测试 |
 | `/api/batch_evaluate` | POST | 批量评估（SSE 流式返回） |
 | `/api/batch_cancel/{task_id}` | POST | 取消运行中的批量评估任务 |
+| `/api/evaluations` | POST | 创建统一异步评估任务（红队 + 可选护栏） |
+| `/api/evaluations/{task_id}` | GET | 查询统一评估任务状态与进度 |
+| `/api/evaluations/{task_id}/results` | GET | 分页获取统一评估任务结果 |
+| `/api/evaluations/{task_id}/cancel` | POST | 取消统一评估任务 |
 
 ## 使用说明
 
@@ -128,6 +132,69 @@ python main.py
 - 执行顺序为：先按攻击分类过滤，再按 `N` 截取。
 - 若 `N` 大于该分类可用条数，会自动按该分类全部可用条数评测。
 - 默认要求使用 `v2` 分类索引；如需临时回退 `v1`，设置 `ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK=true`。
+
+## 统一任务接口（M3）
+
+统一任务接口用于外部前端/网关集成，推荐流程：
+
+1. `POST /api/evaluations` 创建任务
+2. `GET /api/evaluations/{task_id}` 轮询状态
+3. `GET /api/evaluations/{task_id}/results?offset=0&limit=50` 分页拉取结果
+4. `POST /api/evaluations/{task_id}/cancel` 取消任务
+
+创建任务示例：
+
+```bash
+curl -X POST http://localhost:8000/api/evaluations \
+  -H "Authorization: Bearer $JB_DEMO_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "harmbench_text_test",
+    "attack_category": "roleplay_persona",
+    "sample_count": 20,
+    "target": "api",
+    "evaluator": "llm_judge",
+    "include_guardrail": true,
+    "guardrail_target": "local",
+    "guardrail_evaluator": "keyword"
+  }'
+```
+
+说明：
+- `include_guardrail=true` 时，会额外执行护栏评估链路。
+- 结果里的 `phase` 用于区分 `red_team` 和 `guardrail`。
+- 任务与结果会持久化到 SQLite（默认：`runtime/evaluation_tasks.db`）。
+
+联调自检（本地）：
+
+```bash
+# 1) 启动服务（建议固定环境）
+conda activate jb_demo
+export PYTHONNOUSERSITE=1
+python -m uvicorn main:app --host 127.0.0.1 --port 18000
+```
+
+```bash
+# 2) 创建任务
+curl -X POST http://127.0.0.1:18000/api/evaluations \
+  -H "Authorization: Bearer $JB_DEMO_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_id": "harmbench_text_test",
+    "attack_category": "mixed_all",
+    "sample_count": 2,
+    "target": "api",
+    "evaluator": "keyword",
+    "include_guardrail": false
+  }'
+```
+
+```bash
+# 3) 查询状态与结果（替换 <task_id>）
+curl http://127.0.0.1:18000/api/evaluations/<task_id>
+curl 'http://127.0.0.1:18000/api/evaluations/<task_id>/results?offset=0&limit=10'
+curl -X POST http://127.0.0.1:18000/api/evaluations/<task_id>/cancel
+```
 
 ## 攻击分类索引（离线构建）
 
@@ -288,6 +355,8 @@ export JB_DEMO_SERVICE_TOKEN=your_service_token
 export JB_DEMO_REQUIRE_AUTH=true
 export JB_DEMO_ALLOW_LOCAL_BYPASS=true
 export JB_DEMO_MAX_CONCURRENT_BATCH_TASKS=1
+export JB_DEMO_EVAL_DB_PATH=/data/ljc/jb_demo/runtime/evaluation_tasks.db
+export JB_DEMO_EVAL_RESULTS_PAGE_LIMIT=200
 ```
 
 说明：
