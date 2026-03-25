@@ -21,8 +21,11 @@ async def batch_evaluate(req: BatchEvalRequest):
 
     async def generate():
         try:
-            # 加载数据集
-            prompts = load_dataset(req.dataset_id, req.sample_count, req.attack_category)
+            # 先按分类过滤，再按条数截取
+            category_prompts = load_dataset(req.dataset_id, None, req.attack_category)
+            category_total = len(category_prompts)
+            requested_sample_count = req.sample_count if req.sample_count is not None else category_total
+            prompts = category_prompts[:requested_sample_count] if req.sample_count is not None else category_prompts
             total = len(prompts)
 
             # 确定要运行的组合
@@ -47,7 +50,9 @@ async def batch_evaluate(req: BatchEvalRequest):
                 'type': 'init',
                 'total': total_tasks,
                 'prompts_count': total,
-                'combinations': len(combinations)
+                'combinations': len(combinations),
+                'requested_sample_count': requested_sample_count,
+                'category_total_count': category_total,
             }
             yield f"data: {json.dumps(init_data)}\n\n"
 

@@ -1,5 +1,5 @@
 // Main Vue Application
-const { createApp, ref, reactive, computed, onMounted } = Vue;
+const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
 
 const app = createApp({
   components: { 'chat-card': ChatCard },
@@ -48,6 +48,8 @@ const app = createApp({
       started: false,
       running: false,
       total: 0,
+      promptsCount: 0,
+      combinations: 0,
       completed: 0,
       successCount: 0,
       failCount: 0,
@@ -197,6 +199,29 @@ const app = createApp({
       return ds.category_counts[categoryId];
     };
 
+    const selectedCategoryMaxCount = computed(() => {
+      if (!batchConfig.datasetId) return 0;
+      const count = getDatasetCategoryCount(batchConfig.datasetId, batchConfig.attackCategory);
+      return Number.isInteger(count) && count >= 0 ? count : 0;
+    });
+
+    const normalizeBatchSampleCount = () => {
+      const maxCount = selectedCategoryMaxCount.value;
+      let value = Number(batchConfig.sampleCount);
+      if (!Number.isFinite(value)) value = 10;
+      value = Math.floor(value);
+      if (value < 1) value = 1;
+      if (maxCount > 0 && value > maxCount) value = maxCount;
+      batchConfig.sampleCount = value;
+    };
+
+    const canStartBatchEval = computed(() => {
+      if (!batchConfig.datasetId || batchStatus.running) return false;
+      if (selectedCategoryMaxCount.value <= 0) return false;
+      const value = Number(batchConfig.sampleCount);
+      return Number.isInteger(value) && value >= 1 && value <= selectedCategoryMaxCount.value;
+    });
+
     // === API 调用 ===
     const fetchSettings = async () => {
       try {
@@ -248,6 +273,7 @@ const app = createApp({
         if (!attackCategories.value.some(c => c.id === batchConfig.attackCategory)) {
           batchConfig.attackCategory = 'mixed_all';
         }
+        normalizeBatchSampleCount();
       } catch (e) {
         console.error("Datasets load failed", e);
       }
@@ -552,11 +578,24 @@ const app = createApp({
     // === 批量评估 ===
     const startBatchEval = async () => {
       if (!batchConfig.datasetId || batchStatus.running) return;
+      normalizeBatchSampleCount();
+
+      if (selectedCategoryMaxCount.value <= 0) {
+        showToast("当前分类没有可测样本，请切换分类");
+        return;
+      }
+
+      if (!canStartBatchEval.value) {
+        showToast("测试条数无效，请检查后重试");
+        return;
+      }
 
       // 重置状态
       batchStatus.started = true;
       batchStatus.running = true;
       batchStatus.total = 0;
+      batchStatus.promptsCount = 0;
+      batchStatus.combinations = 0;
       batchStatus.completed = 0;
       batchStatus.successCount = 0;
       batchStatus.failCount = 0;
@@ -589,6 +628,8 @@ const app = createApp({
         const handleBatchEvent = (data) => {
           if (data.type === 'init') {
             batchStatus.total = data.total;
+            batchStatus.promptsCount = data.prompts_count || 0;
+            batchStatus.combinations = data.combinations || 0;
           } else if (data.type === 'progress') {
             batchStatus.completed = data.completed;
             batchStatus.successCount = data.success_count;
@@ -669,6 +710,20 @@ const app = createApp({
       fetchAttackMethods();
     });
 
+    watch(
+      () => [batchConfig.datasetId, batchConfig.attackCategory],
+      () => {
+        normalizeBatchSampleCount();
+      }
+    );
+
+    watch(
+      () => batchConfig.sampleCount,
+      () => {
+        normalizeBatchSampleCount();
+      }
+    );
+
     return {
       // 通用
       currentMode, showSettings, settings, form, saveSettings, toast,
@@ -679,7 +734,8 @@ const app = createApp({
       // 批量评估
       datasets, attackCategories, categoryIndexReady, categoryIndexError,
       batchConfig, batchStatus, batchResults, getDatasetName, getAttackCategoryName,
-      getDatasetCategoryCount, startBatchEval,
+      getDatasetCategoryCount, selectedCategoryMaxCount, canStartBatchEval,
+      normalizeBatchSampleCount, startBatchEval,
       // 攻击生成
       attackMethods, attackConfig, attackGenerating, attackTesting,
       generatedPrompts, attackTestResults, quickAttackMethod, generationNote, generationMode, attackMethodsNotice,
