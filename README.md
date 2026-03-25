@@ -142,10 +142,11 @@ conda run -n jb_demo python scripts/build_attack_category_index.py \
   --api-key <YOUR_API_KEY>
 ```
 
-## 真实攻击方法（PAIR / TAP / GCG / AutoDAN）
+## 真实攻击方法（已接入）
 
-- `PAIR`、`TAP`：已接入 EasyJailbreak attacker 主流程（需要 API Key + Model ID）
-- `GCG`、`AutoDAN`：已接入真实 attacker，但依赖本地白盒模型
+- `PAIR`、`TAP`
+- `Cipher`、`JailBroken`、`DeepInception`、`MultiLingual`、`CodeChameleon`
+- `GCG`、`AutoDAN`（依赖本地白盒模型）
 
 白盒模型最小配置（用于 `GCG` / `AutoDAN`）：
 

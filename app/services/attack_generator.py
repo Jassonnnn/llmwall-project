@@ -94,35 +94,35 @@ ATTACK_METHODS = {
         "name": "JailBroken",
         "description": "越狱攻击集合 - 包含多种经典越狱技术",
         "class_path": "easyjailbreak.attacker.Jailbroken_wei_2023.Jailbroken",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
     },
     "Cipher": {
         "name": "Cipher",
         "description": "加密编码攻击 - 使用 Caesar、Morse 等编码",
         "class_path": "easyjailbreak.attacker.Cipher_Yuan_2023.Cipher",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
     },
     "DeepInception": {
         "name": "DeepInception",
         "description": "深度植入攻击 - 通过多层梦境植入",
         "class_path": "easyjailbreak.attacker.DeepInception_Li_2023.DeepInception",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
     },
     "MultiLingual": {
         "name": "MultiLingual",
         "description": "多语言攻击 - 翻译为低资源语言",
         "class_path": "easyjailbreak.attacker.Multilingual_Deng_2023.Multilingual",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
     },
     "CodeChameleon": {
         "name": "CodeChameleon",
         "description": "代码伪装攻击 - 将请求伪装为代码",
         "class_path": "easyjailbreak.attacker.CodeChameleon_2024.CodeChameleon",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
     },
     "GCG": {
@@ -135,7 +135,17 @@ ATTACK_METHODS = {
     },
 }
 
-REAL_ATTACK_METHODS = {"PAIR", "TAP", "GCG", "AutoDAN"}
+REAL_ATTACK_METHODS = {
+    "PAIR",
+    "TAP",
+    "GCG",
+    "AutoDAN",
+    "Cipher",
+    "JailBroken",
+    "DeepInception",
+    "MultiLingual",
+    "CodeChameleon",
+}
 EASYJAILBREAK_LOCAL_PATH = Path(__file__).resolve().parents[2] / "EasyJailbreak"
 
 
@@ -322,13 +332,20 @@ def _build_dataset(seed_prompt: str, count: int):
 
 def _extract_prompt_text(instance: Any) -> str:
     prompt_text = getattr(instance, "jailbreak_prompt", None) or getattr(instance, "query", "")
-    query = getattr(instance, "query", "")
-    if isinstance(prompt_text, str) and "{query}" in prompt_text:
+    if not isinstance(prompt_text, str):
+        return str(prompt_text)
+
+    # 尝试按实例中的所有字段填充模板变量（query / translated_query / encoded_query / decryption_function 等）
+    if "{" in prompt_text and "}" in prompt_text:
         try:
-            return prompt_text.format(query=query)
+            payload: Dict[str, Any] = {}
+            if hasattr(instance, "items"):
+                payload.update(dict(instance.items()))
+            payload.setdefault("query", getattr(instance, "query", ""))
+            return prompt_text.format(**payload)
         except Exception:
             return prompt_text
-    return str(prompt_text)
+    return prompt_text
 
 
 def _unique_prompts(prompts: List[str], count: int) -> List[str]:
@@ -339,6 +356,15 @@ def _unique_prompts(prompts: List[str], count: int) -> List[str]:
         if len(deduped) >= count:
             break
     return deduped
+
+
+def _append_dataset_prompts(prompts: List[str], attacked_dataset: Any, max_items: int) -> None:
+    if attacked_dataset is None:
+        return
+    for item in attacked_dataset:
+        prompts.append(_extract_prompt_text(item))
+        if len(prompts) >= max_items:
+            break
 
 
 def _build_whitebox_model():
@@ -501,6 +527,163 @@ def _run_real_autodan(
     return _unique_prompts(prompts, count)
 
 
+def _run_real_cipher(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("Cipher")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=None,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_jailbroken(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("JailBroken")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        attack_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=attack_model,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_deepinception(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("DeepInception")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=None,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+            scene=os.environ.get("EASYJAILBREAK_DEEPINCEPTION_SCENE") or None,
+            character_number=(
+                int(os.environ["EASYJAILBREAK_DEEPINCEPTION_CHARACTERS"])
+                if os.environ.get("EASYJAILBREAK_DEEPINCEPTION_CHARACTERS")
+                else None
+            ),
+            layer_number=(
+                int(os.environ["EASYJAILBREAK_DEEPINCEPTION_LAYERS"])
+                if os.environ.get("EASYJAILBREAK_DEEPINCEPTION_LAYERS")
+                else None
+            ),
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_multilingual(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("MultiLingual")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=None,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_codechameleon(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("CodeChameleon")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=None,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
 def _run_real_attacker(
     method: str,
     seed_prompt: str,
@@ -517,6 +700,16 @@ def _run_real_attacker(
         return _run_real_gcg(seed_prompt, count)
     if method == "AutoDAN":
         return _run_real_autodan(seed_prompt, count, api_key, model_name, api_base)
+    if method == "Cipher":
+        return _run_real_cipher(seed_prompt, count, api_key, model_name, api_base)
+    if method == "JailBroken":
+        return _run_real_jailbroken(seed_prompt, count, api_key, model_name, api_base)
+    if method == "DeepInception":
+        return _run_real_deepinception(seed_prompt, count, api_key, model_name, api_base)
+    if method == "MultiLingual":
+        return _run_real_multilingual(seed_prompt, count, api_key, model_name, api_base)
+    if method == "CodeChameleon":
+        return _run_real_codechameleon(seed_prompt, count, api_key, model_name, api_base)
     raise AttackConfigError(f"方法 {method} 未配置真实执行器。", code="REAL_ATTACKER_NOT_IMPLEMENTED")
 
 
