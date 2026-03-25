@@ -126,15 +126,22 @@ python main.py
 批量评估中的“攻击分类”依赖 sidecar 索引文件（不修改原始 CSV）。
 
 默认索引路径：
-`datasets/index/attack_category_index_v1.jsonl`
+`datasets/index/attack_category_index_v2.jsonl`
+
+兼容策略：
+- 后端优先加载 `v2` 索引；
+- 若 `v2` 缺失或不可用，会自动回退到 `v1` 并在前端显示告警；
+- 建议定期重建 `v2` 以获得更高分类质量。
 
 构建命令示例：
 
 ```bash
 conda run -n jb_demo python scripts/build_attack_category_index.py \
   --api-key <YOUR_API_KEY> \
-  --model openrouter/deepseek/deepseek-chat \
-  --max-concurrency 8
+  --model gpt-5.4 \
+  --reasoning-effort xhigh \
+  --max-concurrency 8 \
+  --confidence-threshold 0.72
 ```
 
 调试少量样本：
@@ -145,6 +152,17 @@ conda run -n jb_demo python scripts/build_attack_category_index.py \
   --limit 20 \
   --api-key <YOUR_API_KEY>
 ```
+
+可选参数（常用）：
+- `--disable-review`：关闭低置信度/规则冲突样本的二次复核。
+- `--quality-report-output <path>`：指定质量报告 JSON 输出路径。
+- `--audit-sample-per-category <N>`：每个分类抽检样本数（默认 `20`）。
+- `--audit-sample-seed <seed>`：抽检采样随机种子。
+
+构建产物：
+- `datasets/index/attack_category_index_v2.jsonl`：分类索引主文件。
+- `datasets/index/attack_category_quality_report_v2.json`：分类质量汇总（覆盖率、冲突率、低置信度比例等）。
+- `datasets/index/attack_category_audit_samples_v2.jsonl`：分层抽检样本，便于人工复核。
 
 ## 真实攻击方法（已接入）
 

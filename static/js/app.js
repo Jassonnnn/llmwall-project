@@ -37,6 +37,7 @@ const app = createApp({
     ]);
     const categoryIndexReady = ref(false);
     const categoryIndexError = ref('');
+    const categoryIndexWarning = ref('');
     const batchConfig = reactive({
       datasetId: '',
       attackCategory: 'mixed_all',
@@ -260,6 +261,7 @@ const app = createApp({
           datasets.value = payload;
           categoryIndexReady.value = false;
           categoryIndexError.value = '';
+          categoryIndexWarning.value = '';
           attackCategories.value = [
             { id: 'mixed_all', name: '混合（全部）', description: '不筛选攻击类型' }
           ];
@@ -268,6 +270,7 @@ const app = createApp({
           attackCategories.value = payload.attack_categories || attackCategories.value;
           categoryIndexReady.value = !!payload.index_ready;
           categoryIndexError.value = payload.index_error || '';
+          categoryIndexWarning.value = payload.index_warning || '';
         }
 
         if (!attackCategories.value.some(c => c.id === batchConfig.attackCategory)) {
@@ -733,6 +736,7 @@ const app = createApp({
       prompt, lastPrompt, loading, config, results, hasAnyResult, gridClass, shouldRun, runTests,
       // 批量评估
       datasets, attackCategories, categoryIndexReady, categoryIndexError,
+      categoryIndexWarning,
       batchConfig, batchStatus, batchResults, getDatasetName, getAttackCategoryName,
       getDatasetCategoryCount, selectedCategoryMaxCount, canStartBatchEval,
       normalizeBatchSampleCount, startBatchEval,
