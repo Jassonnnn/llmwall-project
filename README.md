@@ -74,11 +74,17 @@ conda activate jb_demo
 cd /data/ljc/jb_demo
 ```
 
+可选：用锁定依赖修正运行环境
+
+```bash
+PYTHONNOUSERSITE=1 python -m pip install -r requirements.lock.txt
+```
+
 ### 3. 启动服务
 
 ```bash
 # 开发模式（支持热重载）
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+PYTHONNOUSERSITE=1 python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 # 或者直接运行
 python main.py
@@ -98,6 +104,7 @@ python main.py
 | `/api/datasets` | GET | 获取可用数据集列表与攻击分类统计 |
 | `/api/test_scenario` | POST | 单条指令测试 |
 | `/api/batch_evaluate` | POST | 批量评估（SSE 流式返回） |
+| `/api/batch_cancel/{task_id}` | POST | 取消运行中的批量评估任务 |
 
 ## 使用说明
 
@@ -238,3 +245,38 @@ python -m nltk.downloader punkt stopwords wordnet
 - 首次使用需要在设置中配置 API Key
 - 本地模型需要先启动 Ollama 服务
 - 批量评估会消耗大量 API 调用，请注意配额
+
+## 环境一致性（防串包）
+
+如果机器上有多个 Python/uvicorn，建议固定以下启动方式，避免误用 `~/.local` 里的旧版本：
+
+```bash
+conda activate jb_demo
+export PYTHONNOUSERSITE=1
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+快速自检：
+
+```bash
+which python
+python -m uvicorn --version
+python -c "import litellm, openai; print(litellm.__version__, openai.__version__)"
+python scripts/doctor_env.py
+```
+
+## 服务鉴权与任务控制（Week-1）
+
+默认开启关键接口鉴权（`/api/config`、`/api/test_scenario`、攻击生成、批量评估/取消）：
+
+```bash
+export JB_DEMO_SERVICE_TOKEN=your_service_token
+export JB_DEMO_REQUIRE_AUTH=true
+export JB_DEMO_ALLOW_LOCAL_BYPASS=true
+export JB_DEMO_MAX_CONCURRENT_BATCH_TASKS=1
+```
+
+说明：
+- 生产环境建议 `JB_DEMO_ALLOW_LOCAL_BYPASS=false`。
+- `batch_evaluate` 响应头会返回 `X-Batch-Task-Id`，SSE `init` 事件也会携带 `task_id`。
+- 可通过 `POST /api/batch_cancel/{task_id}` 发起取消请求。

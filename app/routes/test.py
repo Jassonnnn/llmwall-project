@@ -1,6 +1,7 @@
 import time
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth import require_service_auth
 from app.config import GLOBAL_SETTINGS
 from app.models import AttackRequest, AttackResponse, EvaluatorSingle, TargetSingle
 from app.services.llm import call_llm_model
@@ -9,7 +10,7 @@ from app.services.evaluator import keyword_evaluate, llm_judge_evaluate
 router = APIRouter()
 
 
-@router.post("/test_scenario")
+@router.post("/test_scenario", dependencies=[Depends(require_service_auth)])
 async def test_scenario(req: AttackRequest, target: TargetSingle, evaluator: EvaluatorSingle):
     start_time = time.time()
 

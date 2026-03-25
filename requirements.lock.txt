@@ -1,0 +1,16 @@
+# jb_demo verified runtime set (2026-03-25)
+# Install with:
+#   conda activate jb_demo
+#   PYTHONNOUSERSITE=1 python -m pip install -r requirements.lock.txt
+
+fastapi==0.128.6
+starlette==0.52.1
+pydantic==2.12.5
+uvicorn==0.40.0
+
+litellm==1.81.9
+openai==2.18.0
+httpx==0.28.1
+
+pandas==2.3.3
+jinja2==3.1.6

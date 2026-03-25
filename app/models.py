@@ -78,10 +78,6 @@ class AttackGenRequest(BaseModel):
     count: int = Field(default=5, ge=1, le=50)
     target: Optional[TargetSingle] = "api"
     evaluator: Optional[EvaluatorSingle] = "keyword"
-    # API 配置（用于需要模型的攻击方法）
-    api_key: Optional[str] = None
-    model_name: Optional[str] = None
-    api_base: Optional[str] = None
 
 
 class BatchAttackGenRequest(BaseModel):

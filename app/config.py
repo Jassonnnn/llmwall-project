@@ -1,5 +1,24 @@
+import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return default
+    return max(minimum, value)
 
 # --- 全局配置 (默认值为空，等待前端传入) ---
 GLOBAL_SETTINGS = {
@@ -21,6 +40,12 @@ GLOBAL_SETTINGS = {
 
 # 批量评估任务存储
 BATCH_TASKS: Dict[str, Dict[str, Any]] = {}
+
+# --- 服务安全配置 ---
+JB_DEMO_SERVICE_TOKEN = os.getenv("JB_DEMO_SERVICE_TOKEN", "").strip()
+JB_DEMO_REQUIRE_AUTH = _env_bool("JB_DEMO_REQUIRE_AUTH", True)
+JB_DEMO_ALLOW_LOCAL_BYPASS = _env_bool("JB_DEMO_ALLOW_LOCAL_BYPASS", True)
+JB_DEMO_MAX_CONCURRENT_BATCH_TASKS = _env_int("JB_DEMO_MAX_CONCURRENT_BATCH_TASKS", 1, minimum=1)
 
 # --- 数据集配置 ---
 DATASETS_PATH = Path(__file__).parent.parent / "datasets"

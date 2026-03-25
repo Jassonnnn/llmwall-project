@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth import require_service_auth
 from app.config import GLOBAL_SETTINGS
 from app.models import ConfigUpdateRequest
 
@@ -25,12 +26,12 @@ def _sanitize_config() -> dict:
     return result
 
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(require_service_auth)])
 async def get_config():
     return _sanitize_config()
 
 
-@router.post("/config")
+@router.post("/config", dependencies=[Depends(require_service_auth)])
 async def update_config(req: ConfigUpdateRequest):
     target_cfg = GLOBAL_SETTINGS[req.target]
 

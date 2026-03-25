@@ -48,6 +48,7 @@ const app = createApp({
     const batchStatus = reactive({
       started: false,
       running: false,
+      taskId: '',
       total: 0,
       promptsCount: 0,
       combinations: 0,
@@ -320,14 +321,18 @@ const app = createApp({
           body: JSON.stringify({
             seed_prompt: attackConfig.seedPrompt,
             method: attackConfig.method,
-            count: attackConfig.count,
-            // 传递 API 配置用于需要模型的方法
-            api_key: form.api.api_key,
-            model_name: settings.api.model,
-            api_base: settings.api.api_base
+            count: attackConfig.count
           })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const details = data.details || {};
+          generationMode.value = details.generation_mode || '';
+          generationNote.value = details.note || '';
+          showToast(data.message || `生成失败 (${res.status})`);
+          return;
+        }
+
         if (data.success) {
           generatedPrompts.value = data.prompts;
           generationMode.value = data.generation_mode || '';
@@ -596,6 +601,7 @@ const app = createApp({
       // 重置状态
       batchStatus.started = true;
       batchStatus.running = true;
+      batchStatus.taskId = '';
       batchStatus.total = 0;
       batchStatus.promptsCount = 0;
       batchStatus.combinations = 0;
@@ -621,8 +627,11 @@ const app = createApp({
         });
 
         if (!response.ok || !response.body) {
-          throw new Error(`批量评估请求失败 (${response.status})`);
+          const errPayload = await response.json().catch(() => ({}));
+          throw new Error(errPayload.message || `批量评估请求失败 (${response.status})`);
         }
+
+        batchStatus.taskId = response.headers.get('X-Batch-Task-Id') || '';
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -630,6 +639,7 @@ const app = createApp({
 
         const handleBatchEvent = (data) => {
           if (data.type === 'init') {
+            if (data.task_id) batchStatus.taskId = data.task_id;
             batchStatus.total = data.total;
             batchStatus.promptsCount = data.prompts_count || 0;
             batchStatus.combinations = data.combinations || 0;
@@ -652,13 +662,18 @@ const app = createApp({
           } else if (data.type === 'complete') {
             batchStatus.successRate = data.success_rate;
             batchStatus.completed = data.total;
+            batchStatus.running = false;
             showToast("批量评估完成！");
+          } else if (data.type === 'cancelled') {
+            batchStatus.running = false;
+            showToast(data.message || "批量评估已取消");
           } else if (data.type === 'error') {
             if (data.code === 'CATEGORY_INDEX_MISSING') {
               showToast("分类索引未构建，请先运行离线标注脚本");
             } else {
               showToast("评估出错: " + data.message);
             }
+            batchStatus.running = false;
           }
         };
 
@@ -699,10 +714,27 @@ const app = createApp({
           showToast("批量评估连接中断，结果可能不完整");
         }
       } catch (e) {
-        showToast("连接服务器失败");
+        showToast(e?.message || "连接服务器失败");
         console.error(e);
       } finally {
         batchStatus.running = false;
+      }
+    };
+
+    const cancelBatchEval = async () => {
+      if (!batchStatus.taskId || !batchStatus.running) return;
+      try {
+        const res = await fetch(`/api/batch_cancel/${batchStatus.taskId}`, {
+          method: 'POST'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showToast(data.message || `取消失败 (${res.status})`);
+          return;
+        }
+        showToast('已发送取消请求');
+      } catch (e) {
+        showToast("取消请求失败");
       }
     };
 
@@ -739,7 +771,7 @@ const app = createApp({
       categoryIndexWarning,
       batchConfig, batchStatus, batchResults, getDatasetName, getAttackCategoryName,
       getDatasetCategoryCount, selectedCategoryMaxCount, canStartBatchEval,
-      normalizeBatchSampleCount, startBatchEval,
+      normalizeBatchSampleCount, startBatchEval, cancelBatchEval,
       // 攻击生成
       attackMethods, attackConfig, attackGenerating, attackTesting,
       generatedPrompts, attackTestResults, quickAttackMethod, generationNote, generationMode, attackMethodsNotice,
