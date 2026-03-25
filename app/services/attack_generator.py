@@ -87,7 +87,7 @@ ATTACK_METHODS = {
         "name": "ICA",
         "description": "In-Context Attack - 上下文攻击",
         "class_path": "easyjailbreak.attacker.ICA_wei_2023.ICA",
-        "requires_attack_model": False,
+        "requires_attack_model": True,
         "requires_eval_model": False,
     },
     "JailBroken": {
@@ -140,6 +140,9 @@ REAL_ATTACK_METHODS = {
     "TAP",
     "GCG",
     "AutoDAN",
+    "GPTFuzz",
+    "ReNeLLM",
+    "ICA",
     "Cipher",
     "JailBroken",
     "DeepInception",
@@ -527,6 +530,100 @@ def _run_real_autodan(
     return _unique_prompts(prompts, count)
 
 
+def _run_real_gptfuzz(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("GPTFuzz")
+    prompts: List[str] = []
+
+    dataset = _build_dataset(seed_prompt, 1)
+    attack_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+    target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+    eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+    attacker = attacker_cls(
+        attack_model=attack_model,
+        target_model=target_model,
+        eval_model=eval_model,
+        jailbreak_datasets=dataset,
+        energy=int(os.environ.get("EASYJAILBREAK_GPTFUZZ_ENERGY", "1")),
+        seeds_num=int(os.environ.get("EASYJAILBREAK_GPTFUZZ_SEEDS_NUM", "16")),
+        max_iteration=int(os.environ.get("EASYJAILBREAK_GPTFUZZ_MAX_ITER", "20")),
+    )
+
+    while len(prompts) < count:
+        seed_instance = attacker.select_policy.select()[0]
+        attacked_dataset = attacker.single_attack(seed_instance)
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_renellm(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("ReNeLLM")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        attack_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+        eval_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            attack_model=attack_model,
+            target_model=target_model,
+            eval_model=eval_model,
+            jailbreak_datasets=dataset,
+            evo_max=int(os.environ.get("EASYJAILBREAK_RENELLM_EVO_MAX", "3")),
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
+def _run_real_ica(
+    seed_prompt: str,
+    count: int,
+    api_key: Optional[str],
+    model_name: Optional[str],
+    api_base: Optional[str],
+) -> List[str]:
+    attacker_cls = _load_attacker_class("ICA")
+    prompts: List[str] = []
+
+    while len(prompts) < count:
+        dataset = _build_dataset(seed_prompt, 1)
+        target_model = _build_openai_model(model_name=model_name, api_key=api_key, api_base=api_base)
+
+        attacker = attacker_cls(
+            target_model=target_model,
+            jailbreak_datasets=dataset,
+            prompt_num=int(os.environ.get("EASYJAILBREAK_ICA_PROMPT_NUM", "5")),
+            user_input=False,
+        )
+        attacked_dataset = attacker.single_attack(dataset[0])
+        _append_dataset_prompts(prompts, attacked_dataset, count)
+        if len(attacked_dataset) == 0:
+            break
+
+    return _unique_prompts(prompts, count)
+
+
 def _run_real_cipher(
     seed_prompt: str,
     count: int,
@@ -700,6 +797,12 @@ def _run_real_attacker(
         return _run_real_gcg(seed_prompt, count)
     if method == "AutoDAN":
         return _run_real_autodan(seed_prompt, count, api_key, model_name, api_base)
+    if method == "GPTFuzz":
+        return _run_real_gptfuzz(seed_prompt, count, api_key, model_name, api_base)
+    if method == "ReNeLLM":
+        return _run_real_renellm(seed_prompt, count, api_key, model_name, api_base)
+    if method == "ICA":
+        return _run_real_ica(seed_prompt, count, api_key, model_name, api_base)
     if method == "Cipher":
         return _run_real_cipher(seed_prompt, count, api_key, model_name, api_base)
     if method == "JailBroken":

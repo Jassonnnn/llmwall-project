@@ -145,6 +145,7 @@ conda run -n jb_demo python scripts/build_attack_category_index.py \
 ## 真实攻击方法（已接入）
 
 - `PAIR`、`TAP`
+- `GPTFuzz`、`ReNeLLM`、`ICA`
 - `Cipher`、`JailBroken`、`DeepInception`、`MultiLingual`、`CodeChameleon`
 - `GCG`、`AutoDAN`（依赖本地白盒模型）
 
