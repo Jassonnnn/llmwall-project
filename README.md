@@ -11,35 +11,69 @@
   - LLM 裁判评估（准确）
 - **支持多种模型**：远程 API（OpenRouter/OpenAI）和本地模型（Ollama）
 
+## 文档导航
+
+- `DOCS_INDEX.md`：文档入口与维护规则
+- `README.md`：功能与使用总览（本文件）
+- `REPORT_PROGRESS_2026-03-25.md`：阶段性成果与提交时间线
+- `OPTIMIZATION_PLAN.md`：里程碑规划与后续优化路线
+- `datasets/README.md`：数据集与分类索引说明
+- `AGENTS.md` / `CLAUDE.md`：面向代码代理的工程约束与开发约定
+
+## 当前完成度（对照 `OPTIMIZATION_PLAN.md`）
+
+当前结论：`jb_demo` 已具备内部联调与试运行能力，但还不是“工程化完备”状态。
+
+- `M1`（安全与可用性兜底）：已完成主要项（鉴权、错误协议、任务取消、并发控制、环境锁定）。
+- `M2`（评估可信度）：已完成主要项（`llm_judge` 结构化协议、关键词版本化、`v2` 索引、人工复核回写）。
+- `M3`（统一接口与任务化）：已完成（统一异步任务 API + SQLite 持久化）。
+- `M4`（工程化与交付）：未完成（自动化测试、CI、部署/回滚手册待补齐）。
+
+仍需优化的重点：
+
+1. 自动化测试体系与 CI（当前缺少 `tests/` 与 GitHub Actions）。
+2. 部署/运行/回滚文档与一键化部署（Docker/Compose、`.env.example`）。
+3. 可靠性增强（重试/退避/熔断、细粒度限流与配额）。
+4. 密钥治理增强（从“前端输入”进一步收敛到服务端密钥托管方案）。
+5. 结果导出与基线对比能力（CSV/JSON/Markdown 报告链路）。
+
 ## 项目结构
 
 ```
 jb_demo/
-├── main.py                      # 应用入口（7 行）
+├── main.py                      # 应用入口（轻量启动）
 ├── README.md                    # 项目说明文档
 ├── app/                         # 后端应用（模块化架构）
-│   ├── __init__.py              # FastAPI 应用实例、CORS、静态文件配置
+│   ├── __init__.py              # FastAPI 应用实例、CORS、异常处理、启动初始化
+│   ├── auth.py                  # 服务鉴权（Bearer Token + 本地回环放行）
 │   ├── config.py                # 全局配置（模型设置、数据集配置）
+│   ├── errors.py                # 统一错误结构
 │   ├── models.py                # Pydantic 数据模型
 │   ├── services/                # 业务逻辑层
 │   │   ├── __init__.py
 │   │   ├── llm.py               # LLM 调用服务
 │   │   ├── evaluator.py         # 评估服务（关键词/LLM裁判）
-│   │   └── dataset.py           # 数据集加载服务
+│   │   ├── keyword_rules.py     # 关键词规则版本化
+│   │   ├── dataset.py           # 数据集加载与分类索引管理
+│   │   ├── attack_generator.py  # 攻击方法生成与真实 attacker 接入
+│   │   └── evaluation_tasks.py  # 统一任务编排与 SQLite 持久化
 │   └── routes/                  # API 路由层
 │       ├── __init__.py          # 路由注册
 │       ├── config.py            # 配置相关 API (/api/config)
 │       ├── test.py              # 单条测试 API (/api/test_scenario)
-│       └── batch.py             # 批量评估 API (/api/batch_evaluate)
+│       ├── batch.py             # 批量评估 API (/api/batch_evaluate)
+│       ├── attack.py            # 攻击生成/评估 API
+│       └── evaluations.py       # 统一异步任务 API
 ├── static/                      # 前端静态资源
 │   ├── css/
-│   │   └── style.css            # 全局样式（121 行）
+│   │   └── style.css            # 全局样式
 │   └── js/
-│       ├── app.js               # Vue 应用主逻辑（290 行）
-│       └── components/
-│           └── ChatCard.js      # ChatCard 组件（34 行）
+│       ├── app.js               # Vue 应用主逻辑
+│       └── components/          # 前端组件
 ├── templates/                   # Jinja2 模板
-│   └── index.html               # HTML 模板（715 行，精简后）
+│   └── index.html               # 前端主页面模板
+├── scripts/                     # 索引构建/质量回归/环境诊断脚本
+├── runtime/                     # 运行时目录（SQLite、临时产物）
 └── datasets/                    # 红队测试数据集
     ├── HarmBench/               # HarmBench 数据集
     ├── llm-attacks/             # AdvBench 数据集
@@ -96,19 +130,23 @@ python main.py
 
 ## API 端点
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/` | GET | 主页面 |
-| `/api/config` | GET | 获取当前模型配置 |
-| `/api/config` | POST | 更新模型配置 |
-| `/api/datasets` | GET | 获取可用数据集列表与攻击分类统计 |
-| `/api/test_scenario` | POST | 单条指令测试 |
-| `/api/batch_evaluate` | POST | 批量评估（SSE 流式返回） |
-| `/api/batch_cancel/{task_id}` | POST | 取消运行中的批量评估任务 |
-| `/api/evaluations` | POST | 创建统一异步评估任务（红队 + 可选护栏） |
-| `/api/evaluations/{task_id}` | GET | 查询统一评估任务状态与进度 |
-| `/api/evaluations/{task_id}/results` | GET | 分页获取统一评估任务结果 |
-| `/api/evaluations/{task_id}/cancel` | POST | 取消统一评估任务 |
+| 端点 | 方法 | 说明 | 鉴权 |
+|------|------|------|------|
+| `/` | GET | 主页面 | 否 |
+| `/api/config` | GET | 获取当前模型配置 | 是 |
+| `/api/config` | POST | 更新模型配置 | 是 |
+| `/api/datasets` | GET | 获取可用数据集列表与攻击分类统计 | 否 |
+| `/api/test_scenario` | POST | 单条指令测试 | 是 |
+| `/api/batch_evaluate` | POST | 批量评估（SSE 流式返回） | 是 |
+| `/api/batch_cancel/{task_id}` | POST | 取消运行中的批量评估任务 | 是 |
+| `/api/attack_methods` | GET | 获取攻击方法列表与依赖状态 | 否 |
+| `/api/generate_attacks` | POST | 生成对抗攻击提示词 | 是 |
+| `/api/attack_and_evaluate` | POST | 生成攻击后立即评估 | 是 |
+| `/api/batch_generate_attacks` | POST | 批量生成攻击提示词 | 是 |
+| `/api/evaluations` | POST | 创建统一异步评估任务（红队 + 可选护栏） | 是 |
+| `/api/evaluations/{task_id}` | GET | 查询统一评估任务状态与进度 | 是 |
+| `/api/evaluations/{task_id}/results` | GET | 分页获取统一评估任务结果 | 是 |
+| `/api/evaluations/{task_id}/cancel` | POST | 取消统一评估任务 | 是 |
 
 ## 使用说明
 
@@ -204,8 +242,8 @@ curl -X POST http://127.0.0.1:18000/api/evaluations/<task_id>/cancel
 `datasets/index/attack_category_index_v2.jsonl`
 
 兼容策略：
-- 后端优先加载 `v2` 索引；
-- 若 `v2` 缺失或不可用，会自动回退到 `v1` 并在前端显示告警；
+- 默认强制使用 `v2` 索引；
+- 仅当显式设置 `ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK=true` 时，才允许回退 `v1`；
 - 建议定期重建 `v2` 以获得更高分类质量。
 
 构建命令示例：

@@ -8,8 +8,9 @@
 为支持前端“按攻击类型筛选评测”，本项目采用 sidecar 索引文件，不修改原始 CSV。
 
 - 索引目录：`datasets/index/`
-- 默认索引文件：`datasets/index/attack_category_index_v1.jsonl`
+- 默认索引文件：`datasets/index/attack_category_index_v2.jsonl`
 - 构建脚本：`scripts/build_attack_category_index.py`
+- 运行策略：默认强制 `v2`；仅在设置 `ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK=true` 时允许回退 `v1`
 
 构建示例：
 

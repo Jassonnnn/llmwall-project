@@ -1,69 +1,97 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件用于给代码代理（含 Claude/Codex）提供 `jb_demo` 仓库的快速事实参考。
 
-## 项目概述
+## 项目定位
 
-这是一个 **LLM 红队安全评估平台**，用于测试大语言模型对对抗性攻击的防御能力。支持两种评估模式：
-- **对话测试模式**：单条指令的实时安全评估
-- **批量评估模式**：基于数据集的批量攻击成功率测试
+`jb_demo` 是一个 LLM 红队安全评估后端（FastAPI）+ 内置前端（Vue 3）项目，支持：
 
-## 启动命令
+- 单条提示词安全测试
+- 批量数据集评估（攻击分类 + 固定条数）
+- 越狱攻击提示词生成与联测
+- 统一异步任务接口（red-team + 可选 guardrail）
+
+## 启动方式（推荐）
 
 ```bash
-# 开发模式（热重载）
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
-# 生产模式
-python main.py
+conda activate jb_demo
+export PYTHONNOUSERSITE=1
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-访问 `http://localhost:8000` 查看Web界面。
+可用环境自检：
 
-## 架构概览
-
-### 后端 (main.py)
-- **框架**: FastAPI + Jinja2
-- **LLM调用**: 使用 `litellm` 库统一调用各种模型API
-- **模型配置**: 支持远程API（OpenRouter/OpenAI等）和本地模型（Ollama）
-- **评估方式**:
-  - `keyword_evaluate()`: 关键词匹配检测拒绝词
-  - `llm_judge_evaluate()`: 使用LLM作为裁判判断安全性
-- **批量评估**: 使用SSE (Server-Sent Events) 实时推送进度
-
-### 前端 (templates/index.html)
-- **框架**: Vue 3 + Tailwind CSS
-- **模板语法**: 使用 `[[ ]]` 作为Vue分隔符（避免与Jinja2冲突）
-- **组件**: ChatCard（对话结果卡片）
-
-### 数据集 (datasets/)
-包含三个红队测试数据集：
-- **HarmBench**: 标准化红队评估框架，提示词列为 `Behavior`
-- **AdvBench (llm-attacks)**: 520个有害行为提示词，列为 `goal`
-- **JailbreakBench**: 越狱攻击基准测试
-
-## API 端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/config` | GET/POST | 获取/更新模型配置 |
-| `/api/datasets` | GET | 获取可用数据集列表 |
-| `/api/test_scenario` | POST | 单条指令测试 |
-| `/api/batch_evaluate` | POST | 批量评估（返回SSE流） |
-
-## 添加新数据集
-
-在 `main.py` 的 `AVAILABLE_DATASETS` 字典中添加配置：
-```python
-"dataset_id": {
-    "name": "显示名称",
-    "description": "描述",
-    "path": "相对于datasets/的路径",
-    "prompt_column": "CSV中提示词所在列名",
-    "count": None
-}
+```bash
+python -m pip install -r requirements.lock.txt
+python scripts/doctor_env.py
 ```
 
-## 依赖项
+## 当前后端结构
 
-主要依赖：`fastapi`, `uvicorn`, `litellm`, `pandas`, `jinja2`
+- 入口：`main.py`
+- 应用初始化：`app/__init__.py`
+  - CORS、静态文件、异常处理、启动初始化
+- 路由：`app/routes/`
+  - `config.py`
+  - `test.py`
+  - `batch.py`
+  - `attack.py`
+  - `evaluations.py`
+- 服务：`app/services/`
+  - `llm.py`
+  - `evaluator.py`
+  - `keyword_rules.py`
+  - `dataset.py`
+  - `attack_generator.py`
+  - `evaluation_tasks.py`
+- 鉴权：`app/auth.py`
+- 统一错误：`app/errors.py`
+
+## 关键接口
+
+- 配置：`GET/POST /api/config`
+- 单测：`POST /api/test_scenario`
+- 数据集：`GET /api/datasets`
+- 批量评估：`POST /api/batch_evaluate`
+- 批量取消：`POST /api/batch_cancel/{task_id}`
+- 攻击方法列表：`GET /api/attack_methods`
+- 攻击生成：`POST /api/generate_attacks`
+- 攻击并评估：`POST /api/attack_and_evaluate`
+- 统一任务创建：`POST /api/evaluations`
+- 统一任务查询：`GET /api/evaluations/{task_id}`
+- 统一结果分页：`GET /api/evaluations/{task_id}/results`
+- 统一任务取消：`POST /api/evaluations/{task_id}/cancel`
+
+## 鉴权与安全约束
+
+默认要求服务鉴权（Bearer Token）：
+
+- `JB_DEMO_REQUIRE_AUTH=true`
+- `JB_DEMO_SERVICE_TOKEN=<token>`
+- `JB_DEMO_ALLOW_LOCAL_BYPASS=true`（本地开发可放行，生产建议设为 `false`）
+
+密钥治理原则：
+- 不回传明文 key
+- 配置接口只暴露 `has_api_key` 与掩码值
+
+## 数据集与分类索引
+
+攻击分类索引默认使用 `v2`：
+- `datasets/index/attack_category_index_v2.jsonl`
+
+仅在显式开启时允许回退 `v1`：
+- `ATTACK_CATEGORY_INDEX_ALLOW_FALLBACK=true`
+
+构建与复核脚本：
+- `scripts/build_attack_category_index.py`
+- `scripts/apply_attack_category_review.py`
+
+## 已知现状
+
+- M1/M2/M3 能力已落地（安全基线、评估可信度、统一任务 API）
+- M4 工程化仍待完善（测试、CI、部署/回滚手册）
+
+建议任何功能变更后同步更新：
+- `README.md`
+- `OPTIMIZATION_PLAN.md`
+- `REPORT_PROGRESS_2026-03-25.md`
