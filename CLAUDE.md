@@ -61,6 +61,9 @@ python scripts/doctor_env.py
 - 统一任务查询：`GET /api/evaluations/{task_id}`
 - 统一结果分页：`GET /api/evaluations/{task_id}/results`
 - 统一任务取消：`POST /api/evaluations/{task_id}/cancel`
+- safetydash 登录：`POST /api/auth/login`
+- safetydash 用户态：`GET /api/auth/me`
+- safetydash 红队概览：`GET /api/redteam/overview`
 
 ## 鉴权与安全约束
 

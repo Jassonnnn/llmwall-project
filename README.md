@@ -14,6 +14,7 @@
 ## 文档导航
 
 - `DOCS_INDEX.md`：文档入口与维护规则
+- `SAFETYDASH_ADAPTER.md`：safetydash 前端适配说明（JWT + redteam 聚合接口）
 - `README.md`：功能与使用总览（本文件）
 - `REPORT_PROGRESS_2026-03-25.md`：阶段性成果与提交时间线
 - `OPTIMIZATION_PLAN.md`：里程碑规划与后续优化路线
@@ -147,6 +148,9 @@ python main.py
 | `/api/evaluations/{task_id}` | GET | 查询统一评估任务状态与进度 | 是 |
 | `/api/evaluations/{task_id}/results` | GET | 分页获取统一评估任务结果 | 是 |
 | `/api/evaluations/{task_id}/cancel` | POST | 取消统一评估任务 | 是 |
+| `/api/auth/login` | POST | safetydash 兼容登录（JWT） | 否 |
+| `/api/auth/me` | GET | safetydash 兼容当前用户信息 | JWT |
+| `/api/redteam/overview` | GET | safetydash 红队页聚合数据 | JWT |
 
 ## 使用说明
 
@@ -232,6 +236,42 @@ curl -X POST http://127.0.0.1:18000/api/evaluations \
 curl http://127.0.0.1:18000/api/evaluations/<task_id>
 curl 'http://127.0.0.1:18000/api/evaluations/<task_id>/results?offset=0&limit=10'
 curl -X POST http://127.0.0.1:18000/api/evaluations/<task_id>/cancel
+```
+
+## SafetyDash 适配接口（MVP）
+
+为支持 `safetydash` 前端无代码改动接入，`jb_demo` 新增兼容接口：
+
+1. `POST /api/auth/login`
+2. `GET /api/auth/me`
+3. `GET /api/redteam/overview`
+
+鉴权说明：
+- 兼容接口使用 JWT Bearer（与 `safetydash` 现有前端一致）。
+- 原有 `jb_demo` 关键接口继续沿用服务令牌鉴权（`JB_DEMO_SERVICE_TOKEN`），互不影响。
+
+环境变量（兼容接口）：
+
+```bash
+export JB_DEMO_JWT_SECRET=change-me
+export JB_DEMO_JWT_ALG=HS256
+export JB_DEMO_ACCESS_TOKEN_EXPIRE_MINUTES=60
+export JB_DEMO_SEED_USERNAME=admin
+export JB_DEMO_SEED_PASSWORD=admin
+```
+
+联调步骤（safetydash 前端）：
+
+```bash
+# safetydash frontend .env
+VITE_USE_MOCK=false
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+跨域（如前后端分端口）：
+
+```bash
+export APP_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 ## 攻击分类索引（离线构建）

@@ -21,6 +21,8 @@ cors_from_env = os.getenv("APP_CORS_ALLOW_ORIGINS", "")
 allow_origins = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 if cors_from_env.strip():
     allow_origins = [o.strip() for o in cors_from_env.split(",") if o.strip()]

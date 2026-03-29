@@ -51,6 +51,15 @@ JB_DEMO_EVAL_DB_PATH = Path(
     os.getenv("JB_DEMO_EVAL_DB_PATH", str(RUNTIME_DIR / "evaluation_tasks.db"))
 )
 JB_DEMO_EVAL_RESULTS_PAGE_LIMIT = _env_int("JB_DEMO_EVAL_RESULTS_PAGE_LIMIT", 200, minimum=1)
+JB_DEMO_JWT_SECRET = os.getenv("JB_DEMO_JWT_SECRET", "jb-demo-dev-only-change-me").strip()
+JB_DEMO_JWT_ALG = os.getenv("JB_DEMO_JWT_ALG", "HS256").strip() or "HS256"
+JB_DEMO_ACCESS_TOKEN_EXPIRE_MINUTES = _env_int(
+    "JB_DEMO_ACCESS_TOKEN_EXPIRE_MINUTES",
+    60,
+    minimum=1,
+)
+JB_DEMO_SEED_USERNAME = os.getenv("JB_DEMO_SEED_USERNAME", "admin").strip() or "admin"
+JB_DEMO_SEED_PASSWORD = os.getenv("JB_DEMO_SEED_PASSWORD", "admin")
 
 # --- 数据集配置 ---
 DATASETS_PATH = Path(__file__).parent.parent / "datasets"

@@ -11,6 +11,7 @@ Core capabilities:
 - Batch dataset evaluation with attack-category filtering (`/api/batch_evaluate`)
 - Attack generation and attack+evaluation flows (`/api/generate_attacks`, `/api/attack_and_evaluate`)
 - Unified async task API for red-team + optional guardrail (`/api/evaluations`)
+- SafetyDash compatibility APIs (`/api/auth/*`, `/api/redteam/overview`)
 
 ## 2. Environment and Startup
 
@@ -56,6 +57,7 @@ Public or low-risk read endpoints:
 - `GET /`
 - `GET /api/datasets`
 - `GET /api/attack_methods`
+- `POST /api/auth/login` (JWT login for safetydash)
 
 Auth-protected endpoints (require `Authorization: Bearer <token>` unless local bypass enabled):
 - `GET/POST /api/config`
@@ -69,6 +71,10 @@ Auth-protected endpoints (require `Authorization: Bearer <token>` unless local b
 - `GET /api/evaluations/{task_id}`
 - `GET /api/evaluations/{task_id}/results`
 - `POST /api/evaluations/{task_id}/cancel`
+
+JWT-protected compatibility endpoints:
+- `GET /api/auth/me`
+- `GET /api/redteam/overview`
 
 ## 5. Data and Index Rules
 

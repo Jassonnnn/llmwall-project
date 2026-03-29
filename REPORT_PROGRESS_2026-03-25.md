@@ -167,3 +167,15 @@
 - 已完成 README / 数据集说明 / 代理指引文档的一致性修订。
 - 修正了索引策略描述、运行环境说明、接口总表与阶段完成度映射。
 - 本节为文档维护记录，不计入上文“11 次核心功能提交”统计口径。
+
+---
+
+## 9. safetydash 适配增量（2026-03-26）
+
+- 新增 JWT 兼容鉴权接口：
+  - `POST /api/auth/login`
+  - `GET /api/auth/me`
+- 新增红队聚合兼容接口：
+  - `GET /api/redteam/overview`
+- 该接口将 `jb_demo` 的数据集、任务状态、结果统计映射为 `safetydash` 前端 `RedteamOverview` 结构。
+- 补充适配说明文档：`SAFETYDASH_ADAPTER.md`（字段映射、状态映射、联调步骤、环境变量）。
