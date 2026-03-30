@@ -77,6 +77,8 @@ class EvaluationCreateRequest(BaseModel):
     evaluator: EvaluatorBatch = "keyword"
     attack_category: AttackCategory = "mixed_all"
     sample_count: Optional[int] = Field(default=None, ge=1)
+    attack_methods: List[AttackMethod] = Field(default_factory=list)
+    generated_prompt_count_per_seed: int = Field(default=1, ge=1, le=10)
     include_guardrail: bool = False
     guardrail_target: Optional[TargetSingle] = None
     guardrail_evaluator: Optional[EvaluatorSingle] = None
@@ -93,7 +95,7 @@ class AttackGenRequest(BaseModel):
 
 
 class BatchAttackGenRequest(BaseModel):
-    seed_prompts: List[str] = Field(min_items=1)
+    seed_prompts: List[str] = Field(min_length=1)
     method: AttackMethod
     count_per_prompt: int = Field(default=3, ge=1, le=50)
 

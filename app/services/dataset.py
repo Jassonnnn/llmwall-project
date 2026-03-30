@@ -253,32 +253,61 @@ def _try_load_category_index() -> Tuple[bool, Dict[str, Dict[str, set]], str]:
     return resolved["ready"], resolved["index_map"], resolved["error"]
 
 
+def load_dataset_entries(
+    dataset_id: str,
+    sample_count: Optional[int] = None,
+    attack_category: str = "mixed_all",
+) -> List[Dict[str, Any]]:
+    """
+    加载数据集条目并保留原始 row_id 与攻击分类，便于后续做方法/分类聚合评估。
+    """
+    records = load_dataset_records(dataset_id)
+    resolved = _resolve_category_index()
+
+    valid_categories = set(_category_ids(include_mixed=False))
+    row_to_category: Dict[int, str] = {}
+    if resolved["ready"]:
+        index_map = resolved["index_map"]
+        for cid in valid_categories:
+            for row_id in index_map.get(dataset_id, {}).get(cid, set()):
+                row_to_category[int(row_id)] = cid
+
+    if attack_category != "mixed_all" and attack_category not in valid_categories:
+        raise ValueError(f"未知攻击分类: {attack_category}")
+
+    if attack_category != "mixed_all" and not resolved["ready"]:
+        raise CategoryIndexMissingError(resolved["error"])
+
+    entries: List[Dict[str, Any]] = []
+    for record in records:
+        row_id = int(record["row_id"])
+        prompt = str(record["prompt"])
+        row_category = row_to_category.get(row_id, "mixed_all")
+
+        if attack_category != "mixed_all" and row_category != attack_category:
+            continue
+
+        entries.append(
+            {
+                "row_id": row_id,
+                "prompt": prompt,
+                "attack_category": row_category if row_category != "mixed_all" else attack_category,
+            }
+        )
+
+    if sample_count and sample_count < len(entries):
+        entries = entries[:sample_count]
+
+    return entries
+
+
 def load_dataset(
     dataset_id: str,
     sample_count: Optional[int] = None,
     attack_category: str = "mixed_all",
 ) -> List[str]:
     """加载数据集并返回提示词列表，可按攻击类别过滤。"""
-    records = load_dataset_records(dataset_id)
-
-    if attack_category == "mixed_all":
-        prompts = [r["prompt"] for r in records]
-    else:
-        valid_categories = set(_category_ids(include_mixed=False))
-        if attack_category not in valid_categories:
-            raise ValueError(f"未知攻击分类: {attack_category}")
-
-        resolved = _resolve_category_index()
-        if not resolved["ready"]:
-            raise CategoryIndexMissingError(resolved["error"])
-        index_map = resolved["index_map"]
-        row_ids = index_map.get(dataset_id, {}).get(attack_category, set())
-        prompts = [r["prompt"] for r in records if r["row_id"] in row_ids]
-
-    if sample_count and sample_count < len(prompts):
-        prompts = prompts[:sample_count]
-
-    return prompts
+    return [str(item["prompt"]) for item in load_dataset_entries(dataset_id, sample_count, attack_category)]
 
 
 def get_dataset_info() -> Dict[str, Any]:

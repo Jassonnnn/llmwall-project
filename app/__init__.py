@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -13,8 +14,15 @@ from app.errors import AppError, error_payload
 from app.routes import register_routes
 from app.services.evaluation_tasks import init_evaluation_store
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await init_evaluation_store()
+    yield
+
+
 # 创建 FastAPI 应用实例
-app = FastAPI(title="安全评估平台")
+app = FastAPI(title="安全评估平台", lifespan=lifespan)
 
 # 默认只开放本地开发来源；可通过 APP_CORS_ALLOW_ORIGINS 追加（逗号分隔）
 cors_from_env = os.getenv("APP_CORS_ALLOW_ORIGINS", "")
@@ -92,11 +100,6 @@ async def handle_unexpected_exception(_: Request, exc: Exception):
         status_code=500,
         content=error_payload(code="INTERNAL_ERROR", message="服务内部异常。"),
     )
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    await init_evaluation_store()
 
 
 # 根路由 - 返回主页

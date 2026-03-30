@@ -179,3 +179,68 @@
   - `GET /api/redteam/overview`
 - 该接口将 `jb_demo` 的数据集、任务状态、结果统计映射为 `safetydash` 前端 `RedteamOverview` 结构。
 - 补充适配说明文档：`SAFETYDASH_ADAPTER.md`（字段映射、状态映射、联调步骤、环境变量）。
+
+---
+
+## 10. 真实攻击链稳定性收尾（2026-03-30）
+
+### 10.1 本轮目标
+
+- 不再停留在“方法已经接入”，而是要求真实攻击链能稳定执行。
+- 重点收口 `PAIR`、`TAP`、`GCG`、`AutoDAN` 四个最容易失败的方法。
+- 清理运行时非阻塞 warning，降低联调和演示时的噪声。
+
+### 10.2 本轮核心修复
+
+- `PAIR`：
+  - 修复真实攻击生成链在当前模型供应链上的不稳定问题。
+  - 收敛为可稳定返回真实 adversarial prompt 的执行路径，不再退化成原始 seed prompt。
+- `TAP`：
+  - 修复空分支与剪枝阶段的越界问题。
+  - 收敛为可稳定执行的真实树式攻击生成路径。
+- `GCG`：
+  - 修复白盒模型模板别名兼容问题（如 `llama2` / `llama-2`）。
+  - 调整默认白盒参数，避免不必要的高开销与失败。
+- `AutoDAN`：
+  - 修复 `NLTK` 资源识别与降级逻辑。
+  - 调整默认批量大小、步数与设备选择，提升真实执行稳定性。
+- 白盒模型稳定性：
+  - 默认优先选择更轻量的本地白盒模型候选，降低 `GCG/AutoDAN` 的显存压力。
+  - 按当前 GPU 空闲显存动态选择运行设备，避免默认落到拥挤显卡导致 OOM。
+- OpenAI 兼容链：
+  - 修复 OpenAI message list 直传兼容问题，减少上游 `502` / timeout 对真实攻击流程的影响。
+
+### 10.3 运行时清理
+
+- FastAPI：
+  - 用 `lifespan` 替换旧的 `@app.on_event("startup")`，消除弃用警告。
+- Transformers：
+  - 合并白盒模型生成参数，避免同时传 `generation_config` 与显式生成参数导致的 warning。
+  - 清理 AutoDAN 自定义 `generate()` 中 `max_new_tokens/max_length` 与 `pad_token_id` 的重复设置告警。
+  - 修复 `zero_shot` 对话模板兼容问题与 `bfloat16` 分数转 `numpy` 的类型报错。
+
+### 10.4 验证结果
+
+- 12 个真实攻击方法已全部返回成功：
+  - `PAIR`
+  - `TAP`
+  - `GPTFuzz`
+  - `ReNeLLM`
+  - `ICA`
+  - `Cipher`
+  - `JailBroken`
+  - `DeepInception`
+  - `MultiLingual`
+  - `CodeChameleon`
+  - `GCG`
+  - `AutoDAN`
+- `compileall` 通过：
+  - `python -m compileall app EasyJailbreak/easyjailbreak`
+- 后端测试通过：
+  - `pytest -q tests/test_evaluation_tasks.py`
+  - 结果：`2 passed`
+
+### 10.5 本轮汇报结论
+
+`jb_demo` 当前不只是“接了很多真实攻击方法”，而是已经完成了一轮真实攻击链稳定性收口。  
+也就是说，项目现在具备了“真实方法能跑、结果可验证、运行噪声更低”的状态，更适合做组会汇报、联调演示和下一步工程化整理。

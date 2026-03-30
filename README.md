@@ -6,10 +6,13 @@
 
 - **对话测试模式**：单条指令的实时安全评估
 - **批量评估模式**：基于数据集的批量攻击成功率测试
+- **按攻击分类评估**：支持“混合全部 / 角色扮演 / 编码混淆 / 上下文注入 / 多语言绕过 / 组合攻击”等分类筛选
+- **多攻击方法横评**：同一批种子样本可一次性对比多种攻击方法，并输出方法级聚合指标
 - **多种评估方式**：
   - 关键词匹配检测（快速）
   - LLM 裁判评估（准确）
 - **支持多种模型**：远程 API（OpenRouter/OpenAI）和本地模型（Ollama）
+- **任务化与报告导出**：统一异步任务、SQLite 持久化、`json/csv/markdown` 报告导出
 
 ## 文档导航
 
@@ -23,20 +26,31 @@
 
 ## 当前完成度（对照 `OPTIMIZATION_PLAN.md`）
 
-当前结论：`jb_demo` 已具备内部联调与试运行能力，但还不是“工程化完备”状态。
+当前结论：`jb_demo` 已具备内部联调、真实攻击回归与试运行能力，但还不是“工程化完备”状态。
 
 - `M1`（安全与可用性兜底）：已完成主要项（鉴权、错误协议、任务取消、并发控制、环境锁定）。
 - `M2`（评估可信度）：已完成主要项（`llm_judge` 结构化协议、关键词版本化、`v2` 索引、人工复核回写）。
 - `M3`（统一接口与任务化）：已完成（统一异步任务 API + SQLite 持久化）。
-- `M4`（工程化与交付）：未完成（自动化测试、CI、部署/回滚手册待补齐）。
+- `M4`（工程化与交付）：部分完成（已补核心评估测试，CI、部署/回滚手册待补齐）。
+
+### 最近验证结果（`2026-03-30`）
+
+- 12 个真实攻击方法已完成一次性全量回归，并全部返回成功：
+  - `PAIR`、`TAP`、`GPTFuzz`、`ReNeLLM`、`ICA`
+  - `Cipher`、`JailBroken`、`DeepInception`、`MultiLingual`、`CodeChameleon`
+  - `GCG`、`AutoDAN`
+- `python -m compileall app EasyJailbreak/easyjailbreak` 通过。
+- `pytest -q tests/test_evaluation_tasks.py` 通过，结果为 `2 passed`。
+- 已清理 FastAPI `startup` 弃用告警，并收敛白盒模型生成参数 warning。
+- 白盒方法默认优先选择更轻量本地模型，并按当前 GPU 空闲显存动态选择运行设备，以降低 `GCG/AutoDAN` 的 OOM 风险。
 
 仍需优化的重点：
 
-1. 自动化测试体系与 CI（当前缺少 `tests/` 与 GitHub Actions）。
+1. CI 与自动化回归（已补 `tests/test_evaluation_tasks.py`，但 GitHub Actions 与更完整回归集仍待建设）。
 2. 部署/运行/回滚文档与一键化部署（Docker/Compose、`.env.example`）。
 3. 可靠性增强（重试/退避/熔断、细粒度限流与配额）。
 4. 密钥治理增强（从“前端输入”进一步收敛到服务端密钥托管方案）。
-5. 结果导出与基线对比能力（CSV/JSON/Markdown 报告链路）。
+5. 基线对比与结果看板能力（导出链路已具备，但跨版本基线回归与可视化看板仍待补齐）。
 
 ## 项目结构
 
@@ -45,7 +59,7 @@ jb_demo/
 ├── main.py                      # 应用入口（轻量启动）
 ├── README.md                    # 项目说明文档
 ├── app/                         # 后端应用（模块化架构）
-│   ├── __init__.py              # FastAPI 应用实例、CORS、异常处理、启动初始化
+│   ├── __init__.py              # FastAPI 应用实例、CORS、异常处理、lifespan 初始化
 │   ├── auth.py                  # 服务鉴权（Bearer Token + 本地回环放行）
 │   ├── config.py                # 全局配置（模型设置、数据集配置）
 │   ├── errors.py                # 统一错误结构
@@ -74,6 +88,8 @@ jb_demo/
 ├── templates/                   # Jinja2 模板
 │   └── index.html               # 前端主页面模板
 ├── scripts/                     # 索引构建/质量回归/环境诊断脚本
+├── tests/
+│   └── test_evaluation_tasks.py # 统一评估任务的迁移/聚合/导出测试
 ├── runtime/                     # 运行时目录（SQLite、临时产物）
 └── datasets/                    # 红队测试数据集
     ├── HarmBench/               # HarmBench 数据集
@@ -147,6 +163,7 @@ python main.py
 | `/api/evaluations` | POST | 创建统一异步评估任务（红队 + 可选护栏） | 是 |
 | `/api/evaluations/{task_id}` | GET | 查询统一评估任务状态与进度 | 是 |
 | `/api/evaluations/{task_id}/results` | GET | 分页获取统一评估任务结果 | 是 |
+| `/api/evaluations/{task_id}/export` | GET | 导出任务结果（`json/csv/markdown`） | 是 |
 | `/api/evaluations/{task_id}/cancel` | POST | 取消统一评估任务 | 是 |
 | `/api/auth/login` | POST | safetydash 兼容登录（JWT） | 否 |
 | `/api/auth/me` | GET | safetydash 兼容当前用户信息 | JWT |
@@ -182,7 +199,8 @@ python main.py
 1. `POST /api/evaluations` 创建任务
 2. `GET /api/evaluations/{task_id}` 轮询状态
 3. `GET /api/evaluations/{task_id}/results?offset=0&limit=50` 分页拉取结果
-4. `POST /api/evaluations/{task_id}/cancel` 取消任务
+4. `GET /api/evaluations/{task_id}/export?format=json|csv|markdown` 导出报告
+5. `POST /api/evaluations/{task_id}/cancel` 取消任务
 
 创建任务示例：
 
@@ -196,6 +214,8 @@ curl -X POST http://localhost:8000/api/evaluations \
     "sample_count": 20,
     "target": "api",
     "evaluator": "llm_judge",
+    "attack_methods": ["PAIR", "TAP"],
+    "generated_prompt_count_per_seed": 2,
     "include_guardrail": true,
     "guardrail_target": "local",
     "guardrail_evaluator": "keyword"
@@ -203,8 +223,13 @@ curl -X POST http://localhost:8000/api/evaluations \
 ```
 
 说明：
+- 不传 `attack_methods` 时，保持兼容旧行为：直接拿数据集原始提示词评估，结果中的 `attack_method` 会标记为 `direct_prompt`。
+- 传入 `attack_methods` 后，会在同一批种子样本上对每种方法分别生成攻击提示词，并返回方法级/分类级聚合结果。
+- `generated_prompt_count_per_seed` 控制每个种子样本、每种攻击方法生成多少条攻击提示词，默认 `1`，上限 `10`。
 - `include_guardrail=true` 时，会额外执行护栏评估链路。
 - 结果里的 `phase` 用于区分 `red_team` 和 `guardrail`。
+- 结果明细会额外带上 `seed_prompt`、`source_attack_category`、`attack_method`、`generation_mode`，便于复盘和横向对比。
+- 任务详情会返回 `summary_metrics`、`by_attack_method`、`by_attack_category`，可直接给前端做排行榜或分组对比。
 - 任务与结果会持久化到 SQLite（默认：`runtime/evaluation_tasks.db`）。
 
 联调自检（本地）：
@@ -235,8 +260,16 @@ curl -X POST http://127.0.0.1:18000/api/evaluations \
 # 3) 查询状态与结果（替换 <task_id>）
 curl http://127.0.0.1:18000/api/evaluations/<task_id>
 curl 'http://127.0.0.1:18000/api/evaluations/<task_id>/results?offset=0&limit=10'
+curl -OJ 'http://127.0.0.1:18000/api/evaluations/<task_id>/export?format=markdown'
 curl -X POST http://127.0.0.1:18000/api/evaluations/<task_id>/cancel
 ```
+
+返回结果补充字段：
+
+- `summary_metrics`：红队主链路的总体攻击成功率、拒答率、错误率、平均时延、攻击方法数、攻击分类数。
+- `by_attack_method`：按攻击方法聚合后的样本数、成功率、拒答率、错误率、平均时延与 `rank`。
+- `by_attack_category`：按攻击分类聚合后的样本数、成功率、拒答率、错误率、平均时延与 `rank`。
+- `results[*].attack_method / generation_mode / source_attack_category / seed_prompt`：用于前端详情页、导出报表和人工复核。
 
 ## SafetyDash 适配接口（MVP）
 
@@ -354,6 +387,12 @@ Baseline 模板方法列表：
 - 所有 EasyJailbreak 方法都会优先走真实链路。
 - 配置不满足时返回结构化错误（例如 `MISSING_ATTACK_MODEL_CONFIG`、`MISSING_WHITEBOX_MODEL_CONFIG`），不会静默伪装成“模拟成功”。
 - 生成结果会返回 `generation_mode`：`real_attacker` / `mutation` / `simulated` / `local_template`。
+
+回归测试：
+
+```bash
+conda run -n jb_demo python -m pytest -q tests/test_evaluation_tasks.py
+```
 
 白盒模型最小配置（用于 `GCG` / `AutoDAN`）：
 

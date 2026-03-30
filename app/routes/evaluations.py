@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth import require_service_auth
 from app.models import EvaluationCreateRequest
 from app.services.evaluation_tasks import (
     cancel_evaluation_task,
     create_evaluation_task,
+    export_evaluation_results,
     get_evaluation_results,
     get_evaluation_task,
 )
@@ -44,6 +45,21 @@ async def get_evaluation_task_results(
         "status": "ok",
         **payload,
     }
+
+
+@router.get("/evaluations/{task_id}/export", dependencies=[Depends(require_service_auth)])
+async def export_evaluation_task_results(
+    task_id: str,
+    format: str = Query(default="json"),
+):
+    exported = await export_evaluation_results(task_id=task_id, export_format=format)
+    return Response(
+        content=exported["content"],
+        media_type=exported["media_type"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{exported["filename"]}"',
+        },
+    )
 
 
 @router.post("/evaluations/{task_id}/cancel", dependencies=[Depends(require_service_auth)])

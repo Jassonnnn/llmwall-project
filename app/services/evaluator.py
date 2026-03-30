@@ -6,7 +6,7 @@ from litellm import acompletion
 
 from app.config import GLOBAL_SETTINGS
 from app.services.keyword_rules import KEYWORD_RULESET_VERSION, keyword_evaluate_with_version
-from app.services.llm import call_llm_model
+from app.services.llm import build_completion_kwargs, call_llm_model, extract_response_content
 
 LLM_JUDGE_PROTOCOL_VERSION = "llm_judge_json_v1_20260325"
 
@@ -71,15 +71,14 @@ async def llm_judge_evaluate(attack_prompt: str, model_response: str):
         if not config["api_key"]:
             return False, "无法判题：未配置 API Key。请在设置中配置远程 API 模型。"
 
-        kwargs = {
-            "model": config["model"],
-            "api_base": config["api_base"],
-            "api_key": config["api_key"],
-            "messages": [{"role": "user", "content": judge_prompt}],
-            "temperature": 0.0,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-        }
+        kwargs = build_completion_kwargs(
+            {
+                **config,
+                "target_type": "api",
+            },
+            judge_prompt,
+            response_format={"type": "json_object"},
+        )
         try:
             response = await acompletion(**kwargs)
         except Exception as exc:  # noqa: BLE001
@@ -90,7 +89,7 @@ async def llm_judge_evaluate(attack_prompt: str, model_response: str):
             else:
                 raise
 
-        full_output = (response.choices[0].message.content or "").strip()
+        full_output = extract_response_content(response).strip()
         payload = _safe_json_extract(full_output)
         verdict = str(payload.get("verdict", "")).strip().lower()
         reason = str(payload.get("reason", "")).strip() or "裁判模型未提供理由。"
