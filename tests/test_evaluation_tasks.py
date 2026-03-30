@@ -3,6 +3,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.errors import AppError
 from app.models import EvaluationCreateRequest
 from app.services import evaluation_tasks
 
@@ -89,6 +90,48 @@ def test_init_evaluation_store_migrates_legacy_results_table(tmp_path, monkeypat
 
     assert {"seed_prompt", "source_attack_category", "attack_method", "generation_mode"} <= columns
     assert {"idx_eval_results_task_method", "idx_eval_results_task_category"} <= indexes
+
+
+def test_create_evaluation_task_rejects_whitebox_method_for_api_target() -> None:
+    async def runner() -> None:
+        try:
+            await evaluation_tasks.create_evaluation_task(
+                EvaluationCreateRequest(
+                    dataset_id="harmbench_text_test",
+                    target="api",
+                    evaluator="keyword",
+                    attack_methods=["GCG"],
+                )
+            )
+        except AppError as exc:
+            assert exc.code == "WHITEBOX_METHOD_REQUIRES_LOCAL_TARGET"
+            assert exc.details["method"] == "GCG"
+            assert exc.details["target"] == "api"
+        else:
+            raise AssertionError("expected whitebox api target to be rejected")
+
+    asyncio.run(runner())
+
+
+def test_create_evaluation_task_rejects_whitebox_method_for_all_target() -> None:
+    async def runner() -> None:
+        try:
+            await evaluation_tasks.create_evaluation_task(
+                EvaluationCreateRequest(
+                    dataset_id="harmbench_text_test",
+                    target="all",
+                    evaluator="keyword",
+                    attack_methods=["AutoDAN"],
+                )
+            )
+        except AppError as exc:
+            assert exc.code == "WHITEBOX_METHOD_NOT_SUPPORTED_FOR_ALL_TARGETS"
+            assert exc.details["method"] == "AutoDAN"
+            assert exc.details["target"] == "all"
+        else:
+            raise AssertionError("expected whitebox all target to be rejected")
+
+    asyncio.run(runner())
 
 
 def test_multi_attack_evaluation_summary_and_export(tmp_path, monkeypatch) -> None:

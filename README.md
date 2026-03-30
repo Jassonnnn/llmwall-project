@@ -387,6 +387,8 @@ Baseline 模板方法列表：
 - 所有 EasyJailbreak 方法都会优先走真实链路。
 - 配置不满足时返回结构化错误（例如 `MISSING_ATTACK_MODEL_CONFIG`、`MISSING_WHITEBOX_MODEL_CONFIG`），不会静默伪装成“模拟成功”。
 - 生成结果会返回 `generation_mode`：`real_attacker` / `mutation` / `simulated` / `local_template`。
+- `GCG` / `AutoDAN` 属于白盒攻击，只支持 `local` 目标；不支持纯远程 API 目标，也不支持批量评估中的 `target=all`。
+- 前端会保留白盒方法可见性并显示明确提示，后端会对不合法的目标组合返回结构化错误（如 `WHITEBOX_METHOD_REQUIRES_LOCAL_TARGET`）。
 
 回归测试：
 

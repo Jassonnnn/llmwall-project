@@ -16,7 +16,11 @@ from app.config import (
 )
 from app.errors import AppError
 from app.models import EvaluationCreateRequest
-from app.services.attack_generator import generate_adversarial_prompts
+from app.services.attack_generator import (
+    AttackConfigError,
+    ensure_attack_method_target_supported,
+    generate_adversarial_prompts,
+)
 from app.services.dataset import CategoryIndexMissingError, load_dataset_entries
 from app.services.evaluator import evaluate_single_prompt
 
@@ -553,6 +557,24 @@ async def create_evaluation_task(req: EvaluationCreateRequest) -> Dict[str, Any]
         if method and method not in seen:
             attack_methods.append(method)
             seen.add(method)
+
+    for method in attack_methods:
+        try:
+            ensure_attack_method_target_supported(
+                method,
+                req.target,
+                require_whitebox_ready=True,
+            )
+        except AttackConfigError as exc:
+            raise AppError(
+                code=exc.code,
+                message=str(exc),
+                status_code=400,
+                details={
+                    "method": method,
+                    "target": req.target,
+                },
+            ) from exc
 
     request_payload = {
         "dataset_id": req.dataset_id,

@@ -83,6 +83,30 @@ const app = createApp({
       return attackMethods.value.find(m => m.id === attackConfig.method);
     });
 
+    const selectedAttackMethodRequiresLocalTarget = computed(() => {
+      return Boolean(selectedAttackMethod.value && selectedAttackMethod.value.whitebox_only);
+    });
+
+    const selectedAttackMethodIsTargetMismatch = computed(() => {
+      return Boolean(
+        selectedAttackMethodRequiresLocalTarget.value && attackConfig.target !== 'local'
+      );
+    });
+
+    const selectedAttackMethodIsUnavailable = computed(() => {
+      return Boolean(
+        selectedAttackMethod.value && selectedAttackMethod.value.available === false
+      );
+    });
+
+    const selectedAttackMethodWhiteboxReason = computed(() => {
+      if (!selectedAttackMethod.value || !selectedAttackMethod.value.whitebox_only) return '';
+      return (
+        selectedAttackMethod.value.whitebox_reason ||
+        '此方法属于白盒攻击，需要本地模型参数/权重，不适用于纯 API 远程目标。'
+      );
+    });
+
     const canGenerateAttacks = computed(() => {
       return attackConfig.method && attackConfig.seedPrompt.trim();
     });
@@ -313,7 +337,24 @@ const app = createApp({
     const generateAttacks = async () => {
       if (!canGenerateAttacks.value) return;
 
+      if (selectedAttackMethodIsTargetMismatch.value) {
+        generationNote.value =
+          '当前选择的是远程/API 目标，无法使用该白盒方法。请切换到本地模型，或改用黑盒攻击方法。';
+        showToast('当前目标不支持该白盒方法');
+        return;
+      }
+
+      if (selectedAttackMethodIsUnavailable.value) {
+        generationNote.value =
+          selectedAttackMethod.value?.availability_reason ||
+          selectedAttackMethodWhiteboxReason.value ||
+          '当前方法暂不可用，请检查依赖与配置。';
+        showToast('当前方法暂不可用');
+        return;
+      }
+
       attackGenerating.value = true;
+      generationNote.value = '';
       try {
         const res = await fetch('/api/generate_attacks', {
           method: 'POST',
@@ -321,14 +362,15 @@ const app = createApp({
           body: JSON.stringify({
             seed_prompt: attackConfig.seedPrompt,
             method: attackConfig.method,
-            count: attackConfig.count
+            count: attackConfig.count,
+            target: attackConfig.target
           })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const details = data.details || {};
           generationMode.value = details.generation_mode || '';
-          generationNote.value = details.note || '';
+          generationNote.value = details.note || data.message || '';
           showToast(data.message || `生成失败 (${res.status})`);
           return;
         }
@@ -775,7 +817,9 @@ const app = createApp({
       // 攻击生成
       attackMethods, attackConfig, attackGenerating, attackTesting,
       generatedPrompts, attackTestResults, quickAttackMethod, generationNote, generationMode, attackMethodsNotice,
-      selectedAttackMethod, canGenerateAttacks, attackSuccessCount, attackFailCount,
+      selectedAttackMethod, selectedAttackMethodRequiresLocalTarget, selectedAttackMethodIsTargetMismatch,
+      selectedAttackMethodIsUnavailable, selectedAttackMethodWhiteboxReason,
+      canGenerateAttacks, attackSuccessCount, attackFailCount,
       getGenerationModeLabel,
       generateAttacks, testGeneratedAttacks, clearAttackResults,
       usePromptForTest, copyPrompt, applyQuickMethod

@@ -3,6 +3,8 @@ from fastapi import APIRouter, Depends
 from app.auth import require_service_auth
 from app.models import AttackGenRequest, AttackGenResponse, BatchAttackGenRequest
 from app.services.attack_generator import (
+    AttackConfigError,
+    ensure_attack_method_target_supported,
     get_available_attack_methods,
     generate_adversarial_prompts,
     run_attack_evaluation,
@@ -18,12 +20,33 @@ ERROR_STATUS_MAP = {
     "MISSING_ATTACK_MODEL_CONFIG": 400,
     "MISSING_WHITEBOX_MODEL_CONFIG": 400,
     "AUTODAN_NLTK_RESOURCE_MISSING": 400,
+    "WHITEBOX_METHOD_REQUIRES_LOCAL_TARGET": 400,
+    "WHITEBOX_METHOD_NOT_SUPPORTED_FOR_ALL_TARGETS": 400,
     "DEPENDENCY_MISSING": 503,
     "REAL_ATTACK_EMPTY_RESULT": 502,
     "REAL_ATTACK_EXECUTION_FAILED": 500,
     "REAL_ATTACKER_NOT_IMPLEMENTED": 501,
     "UNKNOWN_METHOD": 400,
 }
+
+
+def _validate_attack_method_target(method: str, target: str) -> None:
+    try:
+        ensure_attack_method_target_supported(
+            method,
+            target,
+            require_whitebox_ready=True,
+        )
+    except AttackConfigError as exc:
+        raise AppError(
+            code=exc.code,
+            message=str(exc),
+            status_code=ERROR_STATUS_MAP.get(exc.code, 400),
+            details={
+                "method": method,
+                "target": target,
+            },
+        ) from exc
 
 
 @router.get("/attack_methods")
@@ -47,6 +70,9 @@ async def generate_attacks(req: AttackGenRequest):
     使用指定的攻击方法基于种子提示词生成对��性越狱提示词
     """
     # Week-1 安全基线：攻击模型配置统一从服务端读取，不接受前端覆盖 key/model/base
+    target = req.target or "api"
+    _validate_attack_method_target(req.method, target)
+
     api_config = GLOBAL_SETTINGS.get("api", {})
     api_key = api_config.get("api_key", "")
     model_name = api_config.get("model", "gpt-4")
@@ -135,6 +161,9 @@ async def batch_generate_attacks(req: BatchAttackGenRequest):
     
     对多个种子提示词批量生成对抗性提示词
     """
+    target = req.target or "api"
+    _validate_attack_method_target(req.method, target)
+
     api_config = GLOBAL_SETTINGS.get("api", {})
     api_key = api_config.get("api_key", "")
     model_name = api_config.get("model", "gpt-4")

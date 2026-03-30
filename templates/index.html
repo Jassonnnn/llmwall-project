@@ -476,8 +476,8 @@
                 <label class="block text-xs font-extrabold text-gray-500 mb-2 uppercase tracking-wider">攻击方法</label>
                 <select v-model="attackConfig.method" class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-semibold focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none">
                   <option value="" disabled>-- 请选择 --</option>
-                  <option v-for="m in attackMethods" :key="m.id" :value="m.id" :disabled="m.available === false">
-                    [[ m.name ]] ([[ getShortDescription(m.description) ]])[[ m.available === false ? '（不可用）' : '' ]]
+                  <option v-for="m in attackMethods" :key="m.id" :value="m.id">
+                    [[ m.name ]][[ m.whitebox_only ? '（白盒）' : '' ]] ([[ getShortDescription(m.description) ]])[[ m.available === false ? '（当前不可运行）' : '' ]]
                   </option>
                 </select>
                 <p v-if="attackMethodsNotice" class="mt-1 text-xs text-orange-600 flex items-center gap-1">
@@ -490,6 +490,18 @@
                 <p v-if="selectedAttackMethod && selectedAttackMethod.requires_attack_model" class="mt-1 text-xs text-orange-600 flex items-center gap-1">
                   <i class="fas fa-exclamation-triangle"></i>
                   此方法需要配置攻击模型（在右上角⚙️设置中配置 API Key）
+                </p>
+                <p v-if="selectedAttackMethodRequiresLocalTarget" class="mt-1 text-xs text-amber-700 flex items-center gap-1">
+                  <i class="fas fa-circle-info"></i>
+                  [[ selectedAttackMethodWhiteboxReason ]]
+                </p>
+                <p v-if="selectedAttackMethodIsTargetMismatch" class="mt-1 text-xs text-red-600 flex items-center gap-1">
+                  <i class="fas fa-exclamation-triangle"></i>
+                  当前选择的是远程/API 目标，无法使用该白盒方法。请切换到本地模型，或改用黑盒攻击方法。
+                </p>
+                <p v-if="selectedAttackMethodIsUnavailable && selectedAttackMethod && selectedAttackMethod.availability_reason" class="mt-1 text-xs text-red-600 flex items-center gap-1">
+                  <i class="fas fa-ban"></i>
+                  [[ selectedAttackMethod.availability_reason ]]
                 </p>
               </div>
 

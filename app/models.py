@@ -98,6 +98,7 @@ class BatchAttackGenRequest(BaseModel):
     seed_prompts: List[str] = Field(min_length=1)
     method: AttackMethod
     count_per_prompt: int = Field(default=3, ge=1, le=50)
+    target: Optional[TargetSingle] = "api"
 
 
 class GeneratedPrompt(BaseModel):
