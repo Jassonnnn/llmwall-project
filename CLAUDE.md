@@ -96,5 +96,5 @@ python scripts/doctor_env.py
 
 建议任何功能变更后同步更新：
 - `README.md`
-- `OPTIMIZATION_PLAN.md`
-- `REPORT_PROGRESS_2026-03-25.md`
+- `docs/plans/OPTIMIZATION_PLAN.md`
+- `docs/reports/REPORT_PROGRESS_2026-03-25.md`

@@ -137,5 +137,5 @@ Not fully complete yet:
 
 When implementing these, keep docs synchronized:
 - `README.md`
-- `OPTIMIZATION_PLAN.md`
-- `REPORT_PROGRESS_2026-03-25.md`
+- `docs/plans/OPTIMIZATION_PLAN.md`
+- `docs/reports/REPORT_PROGRESS_2026-03-25.md`

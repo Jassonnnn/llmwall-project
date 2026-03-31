@@ -137,7 +137,7 @@
 
 ---
 
-## 5. 里程碑完成度（对照 `OPTIMIZATION_PLAN.md`）
+## 5. 里程碑完成度（对照 `../plans/OPTIMIZATION_PLAN.md`）
 
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
@@ -178,7 +178,7 @@
 - 新增红队聚合兼容接口：
   - `GET /api/redteam/overview`
 - 该接口将 `jb_demo` 的数据集、任务状态、结果统计映射为 `safetydash` 前端 `RedteamOverview` 结构。
-- 补充适配说明文档：`SAFETYDASH_ADAPTER.md`（字段映射、状态映射、联调步骤、环境变量）。
+- 补充适配说明文档：`../integration/SAFETYDASH_ADAPTER.md`（字段映射、状态映射、联调步骤、环境变量）。
 
 ---
 

@@ -17,14 +17,14 @@
 ## 文档导航
 
 - `DOCS_INDEX.md`：文档入口与维护规则
-- `SAFETYDASH_ADAPTER.md`：safetydash 前端适配说明（JWT + redteam 聚合接口）
+- `docs/integration/SAFETYDASH_ADAPTER.md`：safetydash 前端适配说明（JWT + redteam 聚合接口）
 - `README.md`：功能与使用总览（本文件）
-- `REPORT_PROGRESS_2026-03-25.md`：阶段性成果与提交时间线
-- `OPTIMIZATION_PLAN.md`：里程碑规划与后续优化路线
+- `docs/reports/REPORT_PROGRESS_2026-03-25.md`：阶段性成果与提交时间线
+- `docs/plans/OPTIMIZATION_PLAN.md`：里程碑规划与后续优化路线
 - `datasets/README.md`：数据集与分类索引说明
 - `AGENTS.md` / `CLAUDE.md`：面向代码代理的工程约束与开发约定
 
-## 当前完成度（对照 `OPTIMIZATION_PLAN.md`）
+## 当前完成度（对照 `docs/plans/OPTIMIZATION_PLAN.md`）
 
 当前结论：`jb_demo` 已具备内部联调、真实攻击回归与试运行能力，但还不是“工程化完备”状态。
 
@@ -58,6 +58,13 @@
 jb_demo/
 ├── main.py                      # 应用入口（轻量启动）
 ├── README.md                    # 项目说明文档
+├── DOCS_INDEX.md                # 文档入口
+├── docs/                        # 规划/汇报/联调文档
+│   ├── integration/             # 前端适配与启动说明
+│   ├── plans/                   # 路线图与优化计划
+│   └── reports/                 # 阶段汇报与周报话术
+├── start_safetydash_stack.sh    # 一键启动 safetydash 联调链路
+├── stop_safetydash_stack.sh     # 一键停止 safetydash 联调链路
 ├── app/                         # 后端应用（模块化架构）
 │   ├── __init__.py              # FastAPI 应用实例、CORS、异常处理、lifespan 初始化
 │   ├── auth.py                  # 服务鉴权（Bearer Token + 本地回环放行）
