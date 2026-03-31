@@ -271,9 +271,9 @@ curl -X POST http://127.0.0.1:18000/api/evaluations/<task_id>/cancel
 - `by_attack_category`：按攻击分类聚合后的样本数、成功率、拒答率、错误率、平均时延与 `rank`。
 - `results[*].attack_method / generation_mode / source_attack_category / seed_prompt`：用于前端详情页、导出报表和人工复核。
 
-## SafetyDash 适配接口（MVP）
+## SafetyDash 适配接口
 
-为支持 `safetydash` 前端无代码改动接入，`jb_demo` 新增兼容接口：
+为支持 `safetydash` 通过 `dashboard-api` 作为 BFF 接入，`jb_demo` 新增兼容接口：
 
 1. `POST /api/auth/login`
 2. `GET /api/auth/me`
@@ -298,7 +298,7 @@ export JB_DEMO_SEED_PASSWORD=admin
 ```bash
 # safetydash frontend .env
 VITE_USE_MOCK=false
-VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_API_BASE_URL=http://127.0.0.1:18117
 ```
 
 跨域（如前后端分端口）：
@@ -306,6 +306,12 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```bash
 export APP_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
+
+说明：
+
+- `safetydash` 前端当前实际通过 `dashboard-api` 发起红队请求。
+- `dashboard-api` 再代理到 `jb_demo` 的原生红队接口（数据集、攻击方法、单条测试、攻击实验室、统一任务接口）。
+- 当前前端已支持三类真实能力：单条 `2x2` 测试、数据集批量评估、独立攻击方法测试。
 
 ## 攻击分类索引（离线构建）
 

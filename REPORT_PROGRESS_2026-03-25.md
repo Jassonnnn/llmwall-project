@@ -244,3 +244,63 @@
 
 `jb_demo` 当前不只是“接了很多真实攻击方法”，而是已经完成了一轮真实攻击链稳定性收口。  
 也就是说，项目现在具备了“真实方法能跑、结果可验证、运行噪声更低”的状态，更适合做组会汇报、联调演示和下一步工程化整理。
+
+---
+
+## 11. safetydash 红队前端闭环接入（2026-03-31）
+
+### 11.1 本轮目标
+
+- 不再只让 `safetydash` 展示红队概览，而是让它真正能发起红队测试。
+- 把红队页补成完整三类能力：
+  - 单条测试（`api/local × keyword/llm_judge`）
+  - 数据集批量评估任务
+  - 独立攻击方法实验室
+- 保持 `jb_demo` 仍然是后端主体，`safetydash` 通过 `dashboard-api` 做 BFF 接入，不把两个项目代码硬耦合在一起。
+
+### 11.2 本轮实现
+
+- `dashboard-api` 新增红队代理接口：
+  - `POST /api/redteam/single-test/matrix`
+  - `POST /api/redteam/attack-lab/generate`
+  - `POST /api/redteam/attack-lab/run`
+- 红队页前端补齐两块之前缺失的能力：
+  - 单条 `2x2` 测试卡片
+  - 攻击方法实验室卡片
+- 为本地联调和演示补充了两个操作脚本：
+  - `start_safetydash_stack.sh`
+  - `stop_safetydash_stack.sh`
+  - 可一键拉起 / 停止 `jb_demo + dashboard-api + safetydash frontend`
+- 这样前端现在已经具备三种真实红队能力：
+  - 单条 prompt 测试
+  - 数据集批量任务创建/查询/分页结果/取消/导出
+  - 独立攻击方法生成与即时评估
+- 白盒方法治理同步补上：
+  - 对 `GCG / AutoDAN` 这类白盒方法，前端显示明确提示
+  - 当前端目标不是 `local` 时直接拦截，避免用户把白盒方法误投到 API 目标
+- 单条矩阵接口增加了“局部失败不拖垮整体”的容错：
+  - 即使 `api` 目标因为没配 Key 失败，`local` 两格仍然正常返回
+  - 前端可以完整展示四格状态，而不是整个接口直接报错
+
+### 11.3 联调验证结果
+
+- 后端测试通过：
+  - `pytest -q tests/test_auth.py tests/test_redteam.py`
+  - 结果：`12 passed`
+- 后端静态编译检查通过：
+  - `python -m compileall app`
+- 前端构建通过：
+  - `npm run build`
+- 真实 smoke test 已通过：
+  - `dashboard-api` 登录成功
+  - `single-test/matrix` 能返回 4 格结构化结果
+  - `attack-lab/generate` 能生成真实攻击提示词
+  - `attack-lab/run` 能完成“生成 + 评估”闭环
+- 其中在未配置远程 API Key 的情况下：
+  - `api` 目标会返回结构化错误
+  - `local` 目标仍然可以正常执行并展示结果
+
+### 11.4 本轮汇报结论
+
+这次改动意味着 `safetydash` 不再只是看板式前端，而是已经可以作为 `jb_demo` 的真实红队前端使用。  
+也就是说，现在可以从前端直接完成单条测试、数据集批量评估、攻击方法独立测试，并拿到结构化结果、任务状态和导出内容，项目的对外接入完整度明显提升。
