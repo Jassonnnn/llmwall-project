@@ -771,6 +771,29 @@ def _unique_prompts(prompts: List[str], count: int) -> List[str]:
     return deduped
 
 
+def _ensure_prompt_count(seed_prompt: str, method: str, prompts: List[str], count: int) -> Tuple[List[str], bool]:
+    finalized = _unique_prompts(prompts, count)
+    if len(finalized) >= count:
+        return finalized[:count], False
+
+    fallback_prompts = generate_mock_adversarial_prompts(seed_prompt, method, max(count * 2, count))
+    for prompt in fallback_prompts:
+        if prompt and prompt not in finalized:
+            finalized.append(prompt)
+        if len(finalized) >= count:
+            return finalized[:count], True
+
+    if finalized:
+        base_prompts = list(finalized)
+        variant_index = 1
+        while len(finalized) < count:
+            source = base_prompts[(len(finalized) - len(base_prompts)) % len(base_prompts)]
+            finalized.append(f"{source}\n\n[Backfill Variation {variant_index}]")
+            variant_index += 1
+
+    return finalized[:count], len(finalized) > 0
+
+
 def _append_dataset_prompts(prompts: List[str], attacked_dataset: Any, max_items: int) -> None:
     if attacked_dataset is None:
         return
@@ -1416,7 +1439,15 @@ async def generate_adversarial_prompts(
 
     # 对于简单方法，直接返回变异结果
     if method in BASIC_ATTACK_METHODS:
-        variations = simple_mutate_prompt(seed_prompt, method)[:count]
+        # variations = simple_mutate_prompt(seed_prompt, method)[:count]
+        raw = simple_mutate_prompt(seed_prompt, method)
+        if raw:
+            variations = [
+                raw[i % len(raw)]
+                for i in range(count)
+            ]
+        else:
+            variations = []
         return {
             "success": True,
             "method": method,
@@ -1456,21 +1487,31 @@ async def generate_adversarial_prompts(
                     "note": "请检查模型配置、配额和方法参数。",
                 }
 
+            finalized_prompts, used_backfill = _ensure_prompt_count(seed_prompt, method, prompts, count)
+            note = f"✅ 使用 {method} 真实攻击链生成"
+            generation_mode = "real_attacker"
+            if used_backfill and len(finalized_prompts) > len(_unique_prompts(prompts, count)):
+                note = (
+                    f"⚠️ {method} 真实攻击链只返回 {len(_unique_prompts(prompts, count))}/{count} 条，"
+                    f"已用回退模板补足到 {len(finalized_prompts)} 条。"
+                )
+                generation_mode = "real_attacker_backfilled"
+
             return {
                 "success": True,
                 "method": method,
                 "seed_prompt": seed_prompt,
-                "generated_count": len(prompts),
-                "generation_mode": "real_attacker",
+                "generated_count": len(finalized_prompts),
+                "generation_mode": generation_mode,
                 "prompts": [
                     {
                         "id": i,
                         "prompt": prompt_text,
                         "technique": f"{method}_Real",
                     }
-                    for i, prompt_text in enumerate(prompts)
+                    for i, prompt_text in enumerate(finalized_prompts)
                 ],
-                "note": f"✅ 使用 {method} 真实攻击链生成",
+                "note": note,
             }
         except AttackConfigError as exc:
             return {

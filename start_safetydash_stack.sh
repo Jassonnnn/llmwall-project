@@ -15,6 +15,7 @@ DB_FILE="${DB_FILE:-$STACK_DIR/safetydash-run.db}"
 JB_PORT="${JB_PORT:-18013}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18117}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+STACK_RELOAD="${STACK_RELOAD:-true}"
 
 JB_SERVICE_TOKEN="${JB_SERVICE_TOKEN:-sd-integration-token}"
 JB_JWT_SECRET="${JB_JWT_SECRET:-jb-demo-dev-only-change-me}"
@@ -173,13 +174,22 @@ main() {
   write_frontend_env
   ensure_dashboard_seed_user
 
+  local conda_base
+  conda_base=$(conda info --base)
+  local jb_reload_args=""
+  local dashboard_reload_args=""
+  if [ "$STACK_RELOAD" = "true" ] || [ "$STACK_RELOAD" = "1" ]; then
+    jb_reload_args="--reload"
+    dashboard_reload_args="--reload"
+  fi
+
   start_service \
     "jb_demo" \
     "$JB_PID_FILE" \
     "$JB_LOG_FILE" \
     "$JB_PORT" \
-    "http://127.0.0.1:$JB_PORT/docs" \
-    "cd \"$JB_DEMO_DIR\" && export JB_DEMO_SERVICE_TOKEN=\"$JB_SERVICE_TOKEN\" JB_DEMO_JWT_SECRET=\"$JB_JWT_SECRET\" JB_DEMO_JWT_ALG=HS256 JB_DEMO_ACCESS_TOKEN_EXPIRE_MINUTES=60 JB_DEMO_SEED_USERNAME=\"$SEED_USERNAME\" JB_DEMO_SEED_PASSWORD=\"$SEED_PASSWORD\" APP_CORS_ALLOW_ORIGINS=\"http://127.0.0.1:$FRONTEND_PORT,http://localhost:$FRONTEND_PORT\" && conda run -n \"$JB_DEMO_CONDA_ENV\" python -m uvicorn main:app --host 127.0.0.1 --port \"$JB_PORT\""
+    "http://127.0.0.1:$JB_PORT/api/datasets" \
+    "source \"$conda_base/etc/profile.d/conda.sh\" && conda activate \"$JB_DEMO_CONDA_ENV\" && cd \"$JB_DEMO_DIR\" && export JB_DEMO_SERVICE_TOKEN=\"$JB_SERVICE_TOKEN\" JB_DEMO_JWT_SECRET=\"$JB_JWT_SECRET\" JB_DEMO_JWT_ALG=HS256 JB_DEMO_ACCESS_TOKEN_EXPIRE_MINUTES=60 JB_DEMO_SEED_USERNAME=\"$SEED_USERNAME\" JB_DEMO_SEED_PASSWORD=\"$SEED_PASSWORD\" APP_CORS_ALLOW_ORIGINS=\"http://127.0.0.1:$FRONTEND_PORT,http://localhost:$FRONTEND_PORT\" && python -m uvicorn main:app --host 127.0.0.1 --port \"$JB_PORT\" $jb_reload_args"
 
   start_service \
     "dashboard-api" \
@@ -187,7 +197,7 @@ main() {
     "$DASHBOARD_LOG_FILE" \
     "$DASHBOARD_PORT" \
     "http://127.0.0.1:$DASHBOARD_PORT/api/healthz" \
-    "source \"$DASHBOARD_VENV/bin/activate\" && cd \"$DASHBOARD_API_DIR\" && export DATABASE_URL=\"sqlite+pysqlite:////$DB_FILE\" SEED_USERNAME=\"$SEED_USERNAME\" SEED_PASSWORD=\"$SEED_PASSWORD\" JB_DEMO_BASE_URL=\"http://127.0.0.1:$JB_PORT\" JB_DEMO_USERNAME=\"$SEED_USERNAME\" JB_DEMO_PASSWORD=\"$SEED_PASSWORD\" JB_DEMO_SERVICE_TOKEN=\"$JB_SERVICE_TOKEN\" && python -m uvicorn app.main:app --host 127.0.0.1 --port \"$DASHBOARD_PORT\""
+    "source \"$DASHBOARD_VENV/bin/activate\" && cd \"$DASHBOARD_API_DIR\" && export DATABASE_URL=\"sqlite+pysqlite:////$DB_FILE\" SEED_USERNAME=\"$SEED_USERNAME\" SEED_PASSWORD=\"$SEED_PASSWORD\" JB_DEMO_BASE_URL=\"http://127.0.0.1:$JB_PORT\" JB_DEMO_USERNAME=\"$SEED_USERNAME\" JB_DEMO_PASSWORD=\"$SEED_PASSWORD\" JB_DEMO_SERVICE_TOKEN=\"$JB_SERVICE_TOKEN\" JB_DEMO_TIMEOUT_SECONDS=90 && python -m uvicorn app.main:app --host 127.0.0.1 --port \"$DASHBOARD_PORT\" $dashboard_reload_args"
 
   start_service \
     "safetydash-frontend" \

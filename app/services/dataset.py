@@ -1,4 +1,6 @@
 import json
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,7 +39,8 @@ def _get_prompt_column(df: pd.DataFrame, expected_col: str) -> str:
     raise ValueError(f"找不到提示词列: {expected_col}")
 
 
-def load_dataset_records(dataset_id: str) -> List[Dict[str, Any]]:
+@lru_cache(maxsize=16)
+def _load_dataset_records_cached(dataset_id: str) -> Tuple[Tuple[int, str], ...]:
     """
     加载数据集记录，返回包含 row_id 和 prompt 的列表。
     row_id 使用原始 CSV 的行号，便于与 sidecar 索引关联。
@@ -54,15 +57,19 @@ def load_dataset_records(dataset_id: str) -> List[Dict[str, Any]]:
     df = pd.read_csv(file_path)
     prompt_col = _get_prompt_column(df, ds_config["prompt_column"])
 
-    records: List[Dict[str, Any]] = []
+    records: List[Tuple[int, str]] = []
     for row_id, prompt in df[prompt_col].items():
         if pd.isna(prompt):
             continue
         text = str(prompt).strip()
         if not text:
             continue
-        records.append({"row_id": int(row_id), "prompt": text})
-    return records
+        records.append((int(row_id), text))
+    return tuple(records)
+
+
+def load_dataset_records(dataset_id: str) -> List[Dict[str, Any]]:
+    return [{"row_id": row_id, "prompt": prompt} for row_id, prompt in _load_dataset_records_cached(dataset_id)]
 
 
 def _load_category_index_from_path(index_path: Path, expected_version: str) -> Dict[str, Dict[str, set]]:
@@ -115,7 +122,8 @@ def _load_category_index_from_path(index_path: Path, expected_version: str) -> D
     return index_map
 
 
-def _resolve_category_index() -> Dict[str, Any]:
+@lru_cache(maxsize=1)
+def _resolve_category_index_cached() -> Dict[str, Any]:
     """
     按优先级加载索引：
     1) v2（preferred）
@@ -197,7 +205,13 @@ def _resolve_category_index() -> Dict[str, Any]:
     }
 
 
-def _load_quality_report(path: Path) -> Dict[str, Any]:
+def _resolve_category_index() -> Dict[str, Any]:
+    return deepcopy(_resolve_category_index_cached())
+
+
+@lru_cache(maxsize=4)
+def _load_quality_report_cached(path_str: str) -> Dict[str, Any]:
+    path = Path(path_str)
     if not path.exists():
         return {}
     try:
@@ -208,6 +222,10 @@ def _load_quality_report(path: Path) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         return {}
     return {}
+
+
+def _load_quality_report(path: Path) -> Dict[str, Any]:
+    return deepcopy(_load_quality_report_cached(str(path)))
 
 
 def _build_runtime_quality_summary(
