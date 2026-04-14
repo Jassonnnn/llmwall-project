@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Literal
 
@@ -109,13 +110,21 @@ def _fetch_task_rows(limit: int = 80) -> List[Dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def _build_prompt_examples(datasets: List[Dict[str, Any]], max_examples: int = 24) -> List[RedteamPromptExample]:
+@lru_cache(maxsize=1)
+def _build_prompt_examples_cached(signature: tuple, max_examples: int) -> List[Dict[str, str]]:
+    datasets = [
+        {
+            "id": ds_id,
+            "category_counts": category_counts,
+        }
+        for ds_id, category_counts in signature
+    ]
     category_name_map = {
         str(item["id"]): str(item["name"])
         for item in ATTACK_CATEGORIES
         if str(item["id"]) != "mixed_all"
     }
-    examples: List[RedteamPromptExample] = []
+    examples: List[Dict[str, str]] = []
     next_id = 1
 
     for ds in datasets:
@@ -136,12 +145,12 @@ def _build_prompt_examples(datasets: List[Dict[str, Any]], max_examples: int = 2
                 continue
 
             examples.append(
-                RedteamPromptExample(
-                    id=f"pe_{next_id:03d}",
-                    title=f"{ds_id} · {category_name}",
-                    prompt=str(prompts[0]),
-                    category=category_name,
-                )
+                {
+                    "id": f"pe_{next_id:03d}",
+                    "title": f"{ds_id} · {category_name}",
+                    "prompt": str(prompts[0]),
+                    "category": category_name,
+                }
             )
             next_id += 1
             if len(examples) >= max_examples:
@@ -160,17 +169,30 @@ def _build_prompt_examples(datasets: List[Dict[str, Any]], max_examples: int = 2
             continue
         for i, prompt in enumerate(prompts, start=1):
             examples.append(
-                RedteamPromptExample(
-                    id=f"pe_{next_id:03d}",
-                    title=f"{ds_id} · mixed #{i}",
-                    prompt=str(prompt),
-                    category="mixed_all",
-                )
+                {
+                    "id": f"pe_{next_id:03d}",
+                    "title": f"{ds_id} · mixed #{i}",
+                    "prompt": str(prompt),
+                    "category": "mixed_all",
+                }
             )
             next_id += 1
             if len(examples) >= max_examples:
                 return examples
     return examples
+
+
+def _build_prompt_examples(datasets: List[Dict[str, Any]], max_examples: int = 24) -> List[RedteamPromptExample]:
+    signature = tuple(
+        (
+            str(ds.get("id", "")),
+            tuple(sorted((ds.get("category_counts") or {}).items())),
+        )
+        for ds in datasets
+        if isinstance(ds, dict)
+    )
+    cached = _build_prompt_examples_cached(signature, max_examples)
+    return [RedteamPromptExample(**item) for item in cached]
 
 
 def _build_running_tasks(rows: List[Dict[str, Any]], max_items: int = 40) -> List[RedteamRunningTask]:
